@@ -1,0 +1,31 @@
+﻿# Carpetas generadas por Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+
+# Archivos de Visual Studio / Rider
+.vs/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+
+# Archivos de sistema
+.DS_Store
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# Archivos de compilación de asset bundles
+*.apk
+*.unitypackage
+*.app
+
+# Crashlytics generated file
+crashlytics-build.properties
