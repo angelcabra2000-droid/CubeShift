@@ -4,14 +4,12 @@ using UnityEngine;
 /// <summary>
 /// FASE 1 — Rotación básica del "Mundo".
 /// Colocar este script sobre el GameObject "Mundo" (el padre del que cuelga
-/// todo el laberinto/cubo). Al presionar las teclas de prueba, el objeto
-/// rota 90° sobre el eje correspondiente con una transición suave (Slerp),
-/// bloqueando nuevas rotaciones mientras una está en curso.
+/// todo el laberinto/cubo). Rota 90° sobre X o Y con una transición suave
+/// (Slerp), bloqueando nuevas rotaciones mientras una está en curso.
 ///
-/// Teclas de prueba (cámbialas cuando definan el input final):
-///   Q / E -> rotar en X (-90 / +90)
+/// Controles (solo X e Y, Z no se usa):
+///   W / S -> rotar en X (-90 / +90)
 ///   A / D -> rotar en Y (-90 / +90)
-///   Z / C -> rotar en Z (-90 / +90)
 /// </summary>
 public class RotadorMundo : MonoBehaviour
 {
@@ -28,14 +26,11 @@ public class RotadorMundo : MonoBehaviour
     {
         if (rotando) return; // ignora input mientras el cubo está girando
 
-        if (Input.GetKeyDown(KeyCode.Q)) IniciarRotacion(Vector3.right, -90f);
-        if (Input.GetKeyDown(KeyCode.E)) IniciarRotacion(Vector3.right, 90f);
+        if (Input.GetKeyDown(KeyCode.S)) IniciarRotacion(Vector3.right, -90f);
+        if (Input.GetKeyDown(KeyCode.W)) IniciarRotacion(Vector3.right, 90f);
 
-        if (Input.GetKeyDown(KeyCode.A)) IniciarRotacion(Vector3.up, -90f);
-        if (Input.GetKeyDown(KeyCode.D)) IniciarRotacion(Vector3.up, 90f);
-
-        if (Input.GetKeyDown(KeyCode.Z)) IniciarRotacion(Vector3.forward, -90f);
-        if (Input.GetKeyDown(KeyCode.C)) IniciarRotacion(Vector3.forward, 90f);
+        if (Input.GetKeyDown(KeyCode.D)) IniciarRotacion(Vector3.up, -90f);
+        if (Input.GetKeyDown(KeyCode.A)) IniciarRotacion(Vector3.up, 90f);
     }
 
     private void IniciarRotacion(Vector3 eje, float grados)
@@ -48,10 +43,8 @@ public class RotadorMundo : MonoBehaviour
         rotando = true;
 
         Quaternion rotacionInicial = transform.rotation;
-        // Multiplicamos en este orden (rotación * rotacionInicial) para que
-        // "eje" se interprete en espacio MUNDIAL, no en el espacio local del
-        // cubo. Así el eje X/Y/Z siempre significa lo mismo para el jugador,
-        // sin importar cómo haya quedado orientado el cubo tras giros previos.
+        // Rotación en espacio MUNDIAL (no local): "eje" siempre significa lo
+        // mismo para el jugador, sin importar la orientación previa del cubo.
         Quaternion rotacionFinal = Quaternion.AngleAxis(grados, eje) * rotacionInicial;
 
         float tiempoTranscurrido = 0f;
