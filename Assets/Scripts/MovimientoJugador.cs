@@ -1,34 +1,29 @@
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Movimiento del Jugador: SOLO adelante/atrás (Flecha Arriba / Flecha
-/// Abajo) a lo largo de su propio transform.forward. W/A/S/D siguen
-/// siendo, como siempre, las teclas que rotan el Mundo (RotadorMundo).
+/// Movimiento del Jugador, todo con W/A/S/D (ya no se usan las flechas):
+///   W / S -> avanzar / retroceder a lo largo de transform.forward
+///   A / D -> girar 90° en el lugar hacia la izquierda / derecha
 ///
-/// Cuando el jugador choca con una pared en la dirección de avance, deja
-/// de moverse y le pregunta a SensorPisoRotacion cuáles de las 4
-/// rotaciones (W/A/S/D) dejarían piso bajo sus pies. Para cada una que
-/// sea válida, activa un "fantasma" semitransparente en la posición
-/// donde quedaría el jugador si esa rotación se ejecuta.
+/// La rotación del Mundo ya NO se dispara con teclado — eso ahora lo hace
+/// ClicParaRotar, al clickear una de las paredes que este script resalta.
 ///
-/// Este script NO rota el Mundo: eso lo sigue haciendo RotadorMundo (ya
-/// editado para consultar 'sensor.PuedeRotar' antes de girar). Este
-/// script solo se encarga de:
-///   1) mover al jugador adelante/atrás y detectar choques,
-///   2) mostrar/ocultar los fantasmas de proyección,
-///   3) cuando una rotación termina (evento OnRotacionCompletada de
-///      RotadorMundo), teletransportar al Jugador a su nueva posición y
-///      rotación relativas al Mundo.
+/// Cuando el jugador choca con una pared, consulta a SensorPisoRotacion
+/// cuáles de las 4 direcciones (adelante/atrás/izquierda/derecha) tienen
+/// una pared que podría convertirse en el nuevo piso, y RESALTA esa(s)
+/// pared(es) con un material distinto mientras la rotación sea válida.
+/// No hay "fantasma" del jugador: como el jugador no cambia de lugar, lo
+/// único que tiene sentido mostrar es cuál pared real se va a convertir
+/// en piso.
 ///
 /// --- CONFIGURACIÓN NECESARIA ---
-/// 1. Colocar este script y SensorPisoRotacion sobre el mismo GameObject
-///    (el Jugador).
-/// 2. Asignar 'rotadorMundo' (el componente RotadorMundo del GameObject
-///    "Mundo") y 'capaParedes' (el mismo Layer "Paredes" de siempre).
-/// 3. Opcional: crear 4 objetos "fantasma" (una copia del modelo del
-///    jugador con un material semitransparente, desactivados por
-///    defecto) y asignarlos en fantasmaW/A/S/D. Si se deja alguno vacío,
-///    simplemente no se muestra proyección para esa dirección.
+/// 1. Colocar este script y SensorPisoRotacion sobre el Jugador.
+/// 2. Asignar 'rotadorMundo' y 'capaParedes' (Layer "Paredes").
+/// 3. Crear un material brillante/de otro color (puede ser el mismo
+///    "Mat_Fantasma" que ya tenés, o uno nuevo tipo "Mat_Resaltado") y
+///    asignarlo en 'materialResaltado'.
 /// </summary>
 [RequireComponent(typeof(SensorPisoRotacion))]
 public class MovimientoJugador : MonoBehaviour
@@ -50,69 +45,63 @@ public class MovimientoJugador : MonoBehaviour
     [Tooltip("Layer de las paredes/geometría del laberinto.")]
     [SerializeField] private LayerMask capaParedes;
 
-    [Header("Fantasmas de proyección")]
-    [Tooltip("Se activa/posiciona cuando la rotación W (eje X, +90°) es válida ahora mismo.")]
-    [SerializeField] private Transform fantasmaW;
-    [Tooltip("Se activa/posiciona cuando la rotación A (eje Y, +90°) es válida ahora mismo.")]
-    [SerializeField] private Transform fantasmaA;
-    [Tooltip("Se activa/posiciona cuando la rotación S (eje X, -90°) es válida ahora mismo.")]
-    [SerializeField] private Transform fantasmaS;
-    [Tooltip("Se activa/posiciona cuando la rotación D (eje Y, -90°) es válida ahora mismo.")]
-    [SerializeField] private Transform fantasmaD;
+    [Header("Resaltado de paredes candidatas")]
+    [Tooltip("Material que se asigna temporalmente a una pared mientras rotar hacia ella sea válido.")]
+    [SerializeField] private Material materialResaltado;
+
+    [Header("Giro en el lugar (Flecha Izquierda / Flecha Derecha)")]
+    [Tooltip("Gira al Jugador 90° sobre su PROPIO eje (no toca el Mundo), para poder encarar los pasillos de los costados. El avance/retroceso (Flecha Arriba/Abajo) siempre es a lo largo de hacia donde esté mirando.")]
+    [SerializeField] private float duracionGiroJugador = 0.2f;
+
+    private bool girando = false;
+
+    // Guarda el material ORIGINAL de cada pared que resaltamos, para devolvérselo después.
+    private readonly Dictionary<Renderer, Material> materialesOriginales = new Dictionary<Renderer, Material>();
+    private readonly HashSet<Renderer> resaltadasEsteFrame = new HashSet<Renderer>();
+    private readonly List<Renderer> bufferRestaurar = new List<Renderer>();
 
     private void Awake()
     {
         sensor = GetComponent<SensorPisoRotacion>();
-        OcultarTodosLosFantasmas();
-    }
-
-    private void OnEnable()
-    {
-        if (rotadorMundo != null)
-            rotadorMundo.OnRotacionCompletada += ManejarRotacionCompletada;
-    }
-
-    private void OnDisable()
-    {
-        if (rotadorMundo != null)
-            rotadorMundo.OnRotacionCompletada -= ManejarRotacionCompletada;
     }
 
     private void Update()
     {
-        // Mientras el Mundo está en medio de un giro, no muevas al jugador
-        // ni muestres proyecciones (la geometría real está a mitad de camino).
         if (rotadorMundo != null && rotadorMundo.EstaRotando)
         {
-            OcultarTodosLosFantasmas();
+            QuitarTodosLosResaltados();
             return;
         }
 
+        if (girando)
+        {
+            QuitarTodosLosResaltados();
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.A)) StartCoroutine(GirarEnElLugar(-90f));
+        else if (Input.GetKeyDown(KeyCode.D)) StartCoroutine(GirarEnElLugar(90f));
+
         bool bloqueado = MoverJugador();
 
-        if (bloqueado) ActualizarFantasmas();
-        else OcultarTodosLosFantasmas();
+        if (bloqueado) ActualizarResaltados();
+        else QuitarTodosLosResaltados();
     }
 
     /// <summary>Mueve al jugador adelante/atrás según input. Devuelve true si el avance está bloqueado por una pared.</summary>
     private bool MoverJugador()
     {
         float entrada = 0f;
-        if (Input.GetKey(KeyCode.UpArrow)) entrada = 1f;
-        else if (Input.GetKey(KeyCode.DownArrow)) entrada = -1f;
+        if (Input.GetKey(KeyCode.W)) entrada = 1f;
+        else if (Input.GetKey(KeyCode.S)) entrada = -1f;
 
         if (Mathf.Approximately(entrada, 0f))
-        {
-            // Sin input de movimiento: igual comprobamos si hay pared
-            // inmediatamente delante o detrás, para poder mostrar los
-            // fantasmas apenas el jugador se queda quieto contra una pared.
             return HayParedEnDireccion(transform.forward) || HayParedEnDireccion(-transform.forward);
-        }
 
         Vector3 direccion = transform.forward * entrada;
 
         if (HayParedEnDireccion(direccion))
-            return true; // bloqueado: no lo dejamos meterse en la pared
+            return true;
 
         transform.position += direccion * velocidad * Time.deltaTime;
         return false;
@@ -124,44 +113,71 @@ public class MovimientoJugador : MonoBehaviour
             out _, distanciaChoque, capaParedes);
     }
 
-    private void ActualizarFantasmas()
+    private void ActualizarResaltados()
     {
-        ActualizarFantasma(fantasmaW, Vector3.right, 90f);
-        ActualizarFantasma(fantasmaA, Vector3.forward, 90f);
-        ActualizarFantasma(fantasmaS, Vector3.right, -90f);
-        ActualizarFantasma(fantasmaD, Vector3.forward, -90f);
+        resaltadasEsteFrame.Clear();
+
+        if (sensor.IntentarAdelante(out RaycastHit hAdelante)) Resaltar(hAdelante);
+        if (sensor.IntentarAtras(out RaycastHit hAtras)) Resaltar(hAtras);
+        if (sensor.IntentarIzquierda(out RaycastHit hIzq)) Resaltar(hIzq);
+        if (sensor.IntentarDerecha(out RaycastHit hDer)) Resaltar(hDer);
+
+        // Restaurar las que estaban resaltadas y ya no corresponden este frame.
+        bufferRestaurar.Clear();
+        foreach (var rend in materialesOriginales.Keys)
+            if (!resaltadasEsteFrame.Contains(rend)) bufferRestaurar.Add(rend);
+
+        foreach (var rend in bufferRestaurar) Restaurar(rend);
     }
 
-    private void ActualizarFantasma(Transform fantasma, Vector3 eje, float grados)
+    private void Resaltar(RaycastHit hit)
     {
-        if (fantasma == null) return;
+        if (materialResaltado == null) return;
 
-        if (sensor != null && sensor.PuedeRotar(eje, grados))
+        Renderer rend = hit.collider != null ? hit.collider.GetComponentInParent<Renderer>() : null;
+        if (rend == null) return;
+
+        resaltadasEsteFrame.Add(rend);
+
+        if (!materialesOriginales.ContainsKey(rend))
         {
-            fantasma.gameObject.SetActive(true);
-            fantasma.position = sensor.PosicionProyectada(eje, grados);
-            fantasma.rotation = sensor.RotacionProyectada(eje, grados);
+            materialesOriginales[rend] = rend.sharedMaterial;
+            rend.material = materialResaltado;
         }
-        else
+    }
+
+    private void Restaurar(Renderer rend)
+    {
+        if (rend != null && materialesOriginales.TryGetValue(rend, out Material original))
+            rend.material = original;
+        materialesOriginales.Remove(rend);
+    }
+
+    private void QuitarTodosLosResaltados()
+    {
+        bufferRestaurar.Clear();
+        bufferRestaurar.AddRange(materialesOriginales.Keys);
+        foreach (var rend in bufferRestaurar) Restaurar(rend);
+    }
+
+    /// <summary>Gira al Jugador 'grados' sobre su propio eje vertical (transform.up), sin tocar el Mundo.</summary>
+    private IEnumerator GirarEnElLugar(float grados)
+    {
+        girando = true;
+
+        Quaternion rotacionInicial = transform.rotation;
+        Quaternion rotacionFinal = rotacionInicial * Quaternion.AngleAxis(grados, Vector3.up);
+
+        float tiempoTranscurrido = 0f;
+        while (tiempoTranscurrido < duracionGiroJugador)
         {
-            fantasma.gameObject.SetActive(false);
+            tiempoTranscurrido += Time.deltaTime;
+            float t = Mathf.Clamp01(tiempoTranscurrido / duracionGiroJugador);
+            transform.rotation = Quaternion.Slerp(rotacionInicial, rotacionFinal, t);
+            yield return null;
         }
-    }
 
-    private void OcultarTodosLosFantasmas()
-    {
-        if (fantasmaW != null) fantasmaW.gameObject.SetActive(false);
-        if (fantasmaA != null) fantasmaA.gameObject.SetActive(false);
-        if (fantasmaS != null) fantasmaS.gameObject.SetActive(false);
-        if (fantasmaD != null) fantasmaD.gameObject.SetActive(false);
-    }
-
-    /// <summary>Se llama cuando RotadorMundo termina de girar: reubica al jugador como si hubiera girado pegado al Mundo.</summary>
-    private void ManejarRotacionCompletada(Vector3 eje, float grados)
-    {
-        if (sensor == null) return;
-
-        transform.position = sensor.PosicionProyectada(eje, grados);
-        transform.rotation = sensor.RotacionProyectada(eje, grados);
+        transform.rotation = rotacionFinal;
+        girando = false;
     }
 }

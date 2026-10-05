@@ -11,19 +11,20 @@ using UnityEngine;
 ///   A: eje Z, +90°  -> la pared de IZQUIERDA  pasa a ser el piso
 ///   D: eje Z, -90°  -> la pared de DERECHA    pasa a ser el piso
 ///
-/// El eje Y a propósito NO se usa para esto: rotar sobre el eje vertical
-/// nunca cambia qué hay "abajo" (la gravedad no se mueve), solo gira el
-/// Mundo sobre sí mismo. Por eso las únicas 2 rotaciones que realmente
-/// cambian el piso son sobre X y sobre Z.
+/// El eje Y a propósito no se usa: rotar sobre el eje vertical nunca
+/// cambia qué hay "abajo".
+///
+/// IMPORTANTE: el Jugador NUNCA se mueve ni rota — eso ahora lo hace
+/// RotadorMundo, girando el Mundo alrededor del Jugador. Por eso este
+/// sensor ya no necesita saber nada del Mundo ni calcular posiciones
+/// proyectadas: solo mira hacia afuera desde la posición actual (fija)
+/// del Jugador.
 ///
 /// Colocar este script sobre el Jugador (junto con MovimientoJugador).
 /// </summary>
 public class SensorPisoRotacion : MonoBehaviour
 {
     [Header("Referencias")]
-    [Tooltip("El GameObject 'Mundo': su transform.position es el pivote alrededor del cual rota todo el laberinto.")]
-    [SerializeField] private Transform mundo;
-
     [Tooltip("Si se deja vacío, se usa este mismo transform (el del Jugador).")]
     [SerializeField] private Transform jugador;
 
@@ -42,60 +43,75 @@ public class SensorPisoRotacion : MonoBehaviour
         if (jugador == null) jugador = transform;
     }
 
-    private Vector3 Pivote => mundo != null ? mundo.position : Vector3.zero;
+    public bool PuedeIrAdelante() => IntentarAdelante(out _);
+    public bool PuedeIrAtras() => IntentarAtras(out _);
+    public bool PuedeIrIzquierda() => IntentarIzquierda(out _);
+    public bool PuedeIrDerecha() => IntentarDerecha(out _);
 
-    public bool PuedeIrAdelante() => HayParedEnDireccion(jugador.forward);
-    public bool PuedeIrAtras() => HayParedEnDireccion(-jugador.forward);
-    public bool PuedeIrIzquierda() => HayParedEnDireccion(-jugador.right);
-    public bool PuedeIrDerecha() => HayParedEnDireccion(jugador.right);
+    /// <summary>Igual que PuedeIrX, pero además devuelve el impacto (para poder resaltar la pared encontrada).</summary>
+    public bool IntentarAdelante(out RaycastHit hit) => Intentar(jugador.forward, out hit);
+    public bool IntentarAtras(out RaycastHit hit) => Intentar(-jugador.forward, out hit);
+    public bool IntentarIzquierda(out RaycastHit hit) => Intentar(-jugador.right, out hit);
+    public bool IntentarDerecha(out RaycastHit hit) => Intentar(jugador.right, out hit);
 
-    private bool HayParedEnDireccion(Vector3 direccion)
+    private bool Intentar(Vector3 direccion, out RaycastHit hit)
     {
         return Physics.SphereCast(jugador.position, radioDeteccion, direccion.normalized,
-            out _, distanciaDeteccion, capaParedes);
+            out hit, distanciaDeteccion, capaParedes);
     }
 
     /// <summary>
-    /// ¿Habría piso debajo del jugador SI el Mundo rotara 'grados' sobre 'eje'
-    /// (mismos parámetros que usa RotadorMundo.IniciarRotacion)? Traduce el
-    /// par (eje, grados) a una de las 4 direcciones de arriba.
+    /// Para una dirección horizontal del mundo (normalmente jugador.forward,
+    /// -jugador.forward, jugador.right o -jugador.right): ¿hay pared ahí
+    /// (rotación válida), y si la hay, qué (eje, grados) hace falta pasarle
+    /// a RotadorMundo para que esa pared termine siendo el piso?
+    ///
+    /// El eje se calcula con un producto cruz en vez de venir fijo (X o Z)
+    /// porque el Jugador ahora puede girar libremente en el lugar (Flecha
+    /// Izquierda/Derecha) — "adelante" ya no es siempre el eje Z del mundo.
     /// </summary>
-    public bool PuedeRotar(Vector3 eje, float grados)
+    public bool ObtenerRotacionParaDireccion(Vector3 direccionMundial, out Vector3 eje, out float grados)
     {
-        if (eje == Vector3.right) return grados > 0 ? PuedeIrAdelante() : PuedeIrAtras();
-        if (eje == Vector3.forward) return grados > 0 ? PuedeIrIzquierda() : PuedeIrDerecha();
-        return false; // eje no soportado (Vector3.up: rotar en Y nunca cambia el piso, ver comentario de arriba)
+        eje = Vector3.zero;
+        grados = 0f;
+
+        if (!Intentar(direccionMundial, out _)) return false;
+
+        // Rotación de 90° que manda 'direccionMundial' exactamente a Vector3.down.
+        eje = Vector3.Cross(direccionMundial, Vector3.down).normalized;
+        grados = 90f;
+        return true;
     }
 
-    /// <summary>Posición donde quedaría el jugador tras esa rotación (viaja junto con el Mundo, como si estuviera pegado a él).</summary>
-    public Vector3 PosicionProyectada(Vector3 eje, float grados)
+    /// <summary>
+    /// Si 'pared' es (el collider de) una de las 4 paredes candidatas AHORA
+    /// MISMO, devuelve la dirección mundial (jugador.forward, etc.) que le
+    /// corresponde — para poder disparar esa rotación desde un click.
+    /// </summary>
+    public bool DireccionParaPared(Collider pared, out Vector3 direccionMundial)
     {
-        Quaternion r = Quaternion.AngleAxis(grados, eje);
-        Vector3 pivote = Pivote;
-        return pivote + r * (jugador.position - pivote);
-    }
-
-    /// <summary>Rotación que tendría el jugador tras esa rotación (para que su "adelante" siga apuntando al mismo pasillo).</summary>
-    public Quaternion RotacionProyectada(Vector3 eje, float grados)
-    {
-        Quaternion r = Quaternion.AngleAxis(grados, eje);
-        return r * jugador.rotation;
+        if (pared != null)
+        {
+            if (Intentar(jugador.forward, out RaycastHit h) && h.collider == pared) { direccionMundial = jugador.forward; return true; }
+            if (Intentar(-jugador.forward, out h) && h.collider == pared) { direccionMundial = -jugador.forward; return true; }
+            if (Intentar(-jugador.right, out h) && h.collider == pared) { direccionMundial = -jugador.right; return true; }
+            if (Intentar(jugador.right, out h) && h.collider == pared) { direccionMundial = jugador.right; return true; }
+        }
+        direccionMundial = Vector3.zero;
+        return false;
     }
 
     // --- DEBUG VISUAL ---
-    // Dibuja en la Scene view las 4 direcciones: verde si hay pared (rotación
-    // válida), rojo si no. Seleccioná al Jugador en la Hierarchy mientras
-    // estás en Play para verlo.
     private void OnDrawGizmosSelected()
     {
         if (jugador == null) jugador = transform;
-        DibujarDireccion(jugador.forward, Application.isPlaying && PuedeIrAdelante());
-        DibujarDireccion(-jugador.forward, Application.isPlaying && PuedeIrAtras());
-        DibujarDireccion(jugador.right, Application.isPlaying && PuedeIrDerecha());
-        DibujarDireccion(-jugador.right, Application.isPlaying && PuedeIrIzquierda());
+        Dibujar(jugador.forward, Application.isPlaying && PuedeIrAdelante());
+        Dibujar(-jugador.forward, Application.isPlaying && PuedeIrAtras());
+        Dibujar(jugador.right, Application.isPlaying && PuedeIrDerecha());
+        Dibujar(-jugador.right, Application.isPlaying && PuedeIrIzquierda());
     }
 
-    private void DibujarDireccion(Vector3 direccion, bool valido)
+    private void Dibujar(Vector3 direccion, bool valido)
     {
         Gizmos.color = valido ? Color.green : Color.red;
         Vector3 origen = jugador.position;

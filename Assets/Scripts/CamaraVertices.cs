@@ -2,31 +2,39 @@ using System.Collections;
 using UnityEngine;
 
 /// <summary>
-/// FASE — Pruebas de cámara: 8 posiciones fijas en los vértices de un cubo
-/// imaginario alrededor del "Mundo", todas mirando hacia su centro.
-/// Presiona las teclas 1-8 para saltar entre vistas, con una transición
-/// suave (igual que la rotación del Mundo).
+/// Cámara con 4 posiciones fijas, una de frente a cada lado horizontal del
+/// "Mundo" (adelante/atrás/izquierda/derecha del objetivo), todas mirando
+/// derecho hacia su centro, a la misma altura (sin vistas de arriba/abajo).
+/// Presiona las teclas 1-4 para saltar entre vistas, con una transición
+/// suave.
+///
+/// (El nombre de la clase quedó como "CamaraVertices" por compatibilidad
+/// con la referencia que ya tenés armada en la escena — aunque ahora ya
+/// no mira desde los vértices del cubo, sino de frente a cada cara.)
 ///
 /// Colocar este script sobre tu Main Camera.
 ///
-/// La cámara viaja ORBITANDO por fuera de una esfera alrededor del objetivo
-/// (interpolando la dirección con Slerp, no la posición con Lerp en línea
-/// recta), así que nunca se acerca al cubo durante la transición, sin
-/// importar qué dos vistas elijas.
+/// La cámara viaja ORBITANDO por fuera de un círculo horizontal alrededor
+/// del objetivo (interpolando la dirección con Slerp, no la posición con
+/// Lerp en línea recta), así que nunca se acerca al cubo durante la
+/// transición, sin importar qué dos vistas elijas.
 ///
-/// Numeración de vértices (en orden de "camino por las aristas": cada
-/// vecino solo cambia un eje respecto al anterior):
-///   1: (-x,-y,-z)   2: (-x,-y,+z)   3: (-x,+y,+z)   4: (-x,+y,-z)
-///   5: (+x,+y,-z)   6: (+x,+y,+z)   7: (+x,-y,+z)   8: (+x,-y,-z)
+/// SEGUIMIENTO CONTINUO: el 'objetivo' (normalmente el Jugador) puede
+/// moverse en cualquier momento, no solo durante una transición de vista.
+/// Por eso, fuera de una transición, la cámara se reubica todos los frames
+/// relativa al objetivo actual.
+///
+/// Numeración de vistas (las 4 direcciones horizontales, en orden):
+///   1: -Z (de frente)   2: +X (derecha)   3: +Z (atrás)   4: -X (izquierda)
 /// </summary>
 public class CamaraVertices : MonoBehaviour
 {
     [Header("Referencias")]
-    [Tooltip("El punto que la cámara siempre mira: normalmente el centro del Mundo.")]
+    [Tooltip("El punto que la cámara siempre mira. Recomendado: el Jugador.")]
     [SerializeField] private Transform objetivo;
 
-    [Header("Geometría de las 8 vistas")]
-    [Tooltip("Distancia desde el objetivo hasta cada vértice.")]
+    [Header("Geometría de las 4 vistas")]
+    [Tooltip("Distancia horizontal desde el objetivo hasta la cámara.")]
     [SerializeField] private float distancia = 8f;
 
     [Header("Transición")]
@@ -37,8 +45,8 @@ public class CamaraVertices : MonoBehaviour
     [SerializeField] private AnimationCurve curvaTransicion = AnimationCurve.EaseInOut(0, 0, 1, 1);
 
     [Header("Vista inicial")]
-    [Tooltip("Vértice (1-8) donde arranca la cámara.")]
-    [SerializeField] private int vistaInicial = 8;
+    [Tooltip("Vista (1-4) donde arranca la cámara.")]
+    [SerializeField] private int vistaInicial = 1;
 
     private Vector3[] direcciones;
     private bool moviendo = false;
@@ -46,24 +54,17 @@ public class CamaraVertices : MonoBehaviour
 
     void Start()
     {
-        // Las 8 combinaciones de signo (-1,+1) en X, Y, Z = los 8 vértices
-        // de un cubo centrado en el objetivo.
-        // Orden tipo "Gray code": cada vértice solo cambia UN eje respecto
-        // al anterior (y el último respecto al primero), formando un camino
-        // continuo por las aristas del cubo.
-        direcciones = new Vector3[8]
+        // Las 4 direcciones horizontales (sin componente Y): frente, derecha,
+        // atrás, izquierda. Todas a la misma altura que el objetivo.
+        direcciones = new Vector3[4]
         {
-            new Vector3(-1, -1, -1).normalized, // 1
-            new Vector3(-1, -1, +1).normalized, // 2
-            new Vector3(-1, +1, +1).normalized, // 3
-            new Vector3(-1, +1, -1).normalized, // 4
-            new Vector3(+1, +1, -1).normalized, // 5
-            new Vector3(+1, +1, +1).normalized, // 6
-            new Vector3(+1, -1, +1).normalized, // 7
-            new Vector3(+1, -1, -1).normalized, // 8
+            new Vector3(0, 0, -1), // 1: de frente
+            new Vector3(1, 0, 0),  // 2: derecha
+            new Vector3(0, 0, 1),  // 3: atrás
+            new Vector3(-1, 0, 0), // 4: izquierda
         };
 
-        vistaActual = Mathf.Clamp(vistaInicial, 1, 8) - 1;
+        vistaActual = Mathf.Clamp(vistaInicial, 1, 4) - 1;
         Vector3 posInicial = ObtenerPosicionVista(vistaActual);
         transform.position = posInicial;
         transform.rotation = Quaternion.LookRotation((ObjetivoPos() - posInicial).normalized);
@@ -77,10 +78,19 @@ public class CamaraVertices : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.Alpha2)) IrAVista(1);
         if (Input.GetKeyDown(KeyCode.Alpha3)) IrAVista(2);
         if (Input.GetKeyDown(KeyCode.Alpha4)) IrAVista(3);
-        if (Input.GetKeyDown(KeyCode.Alpha5)) IrAVista(4);
-        if (Input.GetKeyDown(KeyCode.Alpha6)) IrAVista(5);
-        if (Input.GetKeyDown(KeyCode.Alpha7)) IrAVista(6);
-        if (Input.GetKeyDown(KeyCode.Alpha8)) IrAVista(7);
+    }
+
+    void LateUpdate()
+    {
+        // Mientras NO estamos en medio de una transición de vista, seguimos
+        // al objetivo todos los frames (el objetivo puede moverse por sí
+        // solo, ej. el Jugador caminando).
+        if (moviendo) return;
+
+        Vector3 objetivoPos = ObjetivoPos();
+        Vector3 posActual = objetivoPos + direcciones[vistaActual] * distancia;
+        transform.position = posActual;
+        transform.rotation = Quaternion.LookRotation((objetivoPos - posActual).normalized);
     }
 
     private Vector3 ObjetivoPos() => objetivo != null ? objetivo.position : Vector3.zero;
@@ -98,8 +108,7 @@ public class CamaraVertices : MonoBehaviour
     {
         moviendo = true;
 
-        Vector3 objetivoPos = ObjetivoPos();
-        Vector3 dirInicial = (transform.position - objetivoPos).normalized;
+        Vector3 dirInicial = (transform.position - ObjetivoPos()).normalized;
         Quaternion rotInicial = transform.rotation;
 
         Vector3 dirFinal = direcciones[indice];
@@ -114,16 +123,18 @@ public class CamaraVertices : MonoBehaviour
             float tCurva = curvaTransicion.Evaluate(t);
 
             // Slerp de la DIRECCIÓN (no de la posición): esto hace que la
-            // cámara viaje por un arco sobre la esfera de radio 'distancia'
-            // alrededor del objetivo, en vez de una línea recta que podría
-            // pasar por dentro del cubo.
+            // cámara viaje por un arco alrededor del objetivo, en vez de una
+            // línea recta que podría pasar por dentro del cubo. Seguimos
+            // leyendo ObjetivoPos() cada frame para no perder de vista un
+            // objetivo que también se mueve.
+            Vector3 objetivoPos = ObjetivoPos();
             Vector3 dirActual = Vector3.Slerp(dirInicial, dirFinal, tCurva);
             transform.position = objetivoPos + dirActual * distancia;
             transform.rotation = Quaternion.Slerp(rotInicial, rotFinal, tCurva);
             yield return null;
         }
 
-        transform.position = objetivoPos + dirFinal * distancia;
+        transform.position = ObjetivoPos() + dirFinal * distancia;
         transform.rotation = rotFinal;
         moviendo = false;
     }

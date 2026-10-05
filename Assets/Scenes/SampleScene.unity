@@ -131,7 +131,7 @@ GameObject:
   - component: {fileID: 97938803}
   - component: {fileID: 97938802}
   - component: {fileID: 97938801}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Cube (3)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -239,7 +239,7 @@ GameObject:
   - component: {fileID: 267167201}
   - component: {fileID: 267167200}
   - component: {fileID: 267167199}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Cube (4)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -348,6 +348,7 @@ GameObject:
   - component: {fileID: 330585544}
   - component: {fileID: 330585547}
   - component: {fileID: 330585548}
+  - component: {fileID: 330585549}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -485,7 +486,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8f43e86afe54ba24298a3e75ff2ed061, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  objetivo: {fileID: 539437559}
+  objetivo: {fileID: 2052638939}
   distancia: 15
   duracionTransicion: 0.5
   curvaTransicion:
@@ -513,6 +514,24 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 4
   vistaInicial: 8
+--- !u!114 &330585549
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 330585543}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 248b77dec7e2ee64f8196af7344c576b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  jugador: {fileID: 2052638939}
+  capaParedes:
+    serializedVersion: 2
+    m_Bits: 64
+  radioDeteccion: 0.15
+  margenAntesDelJugador: 0.3
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -644,7 +663,7 @@ GameObject:
   m_Component:
   - component: {fileID: 539437559}
   - component: {fileID: 539437560}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Mundo
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -684,6 +703,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 57192cb55eedc524ba2871aa61166f80, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  jugador: {fileID: 2052638939}
   duracionGiro: 0.35
   curvaGiro:
     serializedVersion: 2
@@ -709,6 +729,7 @@ MonoBehaviour:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+  sensor: {fileID: 0}
 --- !u!1 &597566715
 GameObject:
   m_ObjectHideFlags: 0
@@ -721,7 +742,7 @@ GameObject:
   - component: {fileID: 597566719}
   - component: {fileID: 597566718}
   - component: {fileID: 597566717}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Cube (2)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -878,7 +899,7 @@ GameObject:
   - component: {fileID: 1013605585}
   - component: {fileID: 1013605584}
   - component: {fileID: 1013605583}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Cube (1)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -986,7 +1007,7 @@ GameObject:
   - component: {fileID: 1843715574}
   - component: {fileID: 1843715573}
   - component: {fileID: 1843715572}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Cube
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1094,6 +1115,9 @@ GameObject:
   - component: {fileID: 2052638938}
   - component: {fileID: 2052638937}
   - component: {fileID: 2052638936}
+  - component: {fileID: 2052638941}
+  - component: {fileID: 2052638940}
+  - component: {fileID: 2052638942}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -1186,12 +1210,70 @@ Transform:
   m_GameObject: {fileID: 2052638935}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 0, y: -3.37, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2052638940
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2052638935}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 098647c05b1f4424e9abe26529b35a8f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  rotadorMundo: {fileID: 539437560}
+  velocidad: 3
+  distanciaChoque: 0.5
+  radioChoque: 0.3
+  capaParedes:
+    serializedVersion: 2
+    m_Bits: 64
+  materialResaltado: {fileID: 2100000, guid: aafed7ab02906254a8fbd81f801dfb2f, type: 2}
+  duracionGiroJugador: 0.2
+--- !u!114 &2052638941
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2052638935}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 63ccfca0abe54754f9d734d1886f7ae1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  jugador: {fileID: 2052638939}
+  capaParedes:
+    serializedVersion: 2
+    m_Bits: 64
+  radioDeteccion: 0.3
+  distanciaDeteccion: 0.6
+--- !u!114 &2052638942
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2052638935}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 206d56eeac029474c8f010d2c5b1ecf4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  camara: {fileID: 330585545}
+  rotadorMundo: {fileID: 539437560}
+  sensor: {fileID: 2052638941}
+  capaParedes:
+    serializedVersion: 2
+    m_Bits: 64
+  distanciaMaxima: 100
 --- !u!1 &2094574500
 GameObject:
   m_ObjectHideFlags: 0
@@ -1204,7 +1286,7 @@ GameObject:
   - component: {fileID: 2094574504}
   - component: {fileID: 2094574503}
   - component: {fileID: 2094574502}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Cube (5)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
