@@ -65,8 +65,12 @@ public class ClicParaRotar : MonoBehaviour
             if (sensor.DireccionParaPared(impacto.collider, out Vector3 direccion)
                 && sensor.ObtenerRotacionParaDireccion(direccion, out Vector3 eje, out float grados))
             {
-                if (depurar) Debug.Log($"[ClicParaRotar] Pared válida: {impacto.collider.name}. Rotando eje={eje}, grados={grados}.");
-                rotadorMundo.Rotar(eje, grados);
+                // Cuánto ajustar el Mundo en vertical para que el piso nuevo
+                // quede justo bajo los pies (si falla, 0 = sin ajuste).
+                sensor.ObtenerCorreccionVertical(direccion, out float correccion);
+
+                if (depurar) Debug.Log($"[ClicParaRotar] Pared válida: {impacto.collider.name}. Rotando eje={eje}, grados={grados}, correccionVertical={correccion:F3}.");
+                rotadorMundo.Rotar(eje, grados, correccion);
                 return;
             }
         }

@@ -41,6 +41,9 @@ public class SensorPisoRotacion : MonoBehaviour
     [Tooltip("Distancia a la que se busca pared, en cada una de las 4 direcciones horizontales.")]
     [SerializeField] private float distanciaDeteccion = 0.6f;
 
+    [Tooltip("Solo se usa si el Jugador NO tiene Collider: distancia del centro del Jugador a sus pies. Con Collider se calcula sola.")]
+    [SerializeField] private float alturaHastaPiesManual = 1f;
+
     private void Awake()
     {
         if (jugador == null) jugador = transform;
@@ -117,6 +120,56 @@ public class SensorPisoRotacion : MonoBehaviour
         // Rotación de 90° que manda 'direccionMundial' exactamente a Vector3.down.
         eje = Vector3.Cross(direccionMundial, Vector3.down).normalized;
         grados = 90f;
+        return true;
+    }
+
+    /// <summary>
+    /// Distancia vertical desde el centro del Jugador hasta la suela de sus
+    /// pies. Se calcula sola a partir del Collider del Jugador (sirve para
+    /// cualquier tamaño de cápsula); si no tiene Collider, usa el valor manual.
+    /// </summary>
+    public float AlturaHastaPies
+    {
+        get
+        {
+            Collider col = jugador != null ? jugador.GetComponent<Collider>() : null;
+            return col != null ? jugador.position.y - col.bounds.min.y : alturaHastaPiesManual;
+        }
+    }
+
+    /// <summary>
+    /// Cuánto hay que subir (+) o bajar (-) el Mundo, además del giro, para
+    /// que la pared que está en 'direccionMundial' quede EXACTAMENTE bajo los
+    /// pies del Jugador una vez convertida en piso.
+    ///
+    /// Al rotar alrededor del Jugador, una pared que estaba a distancia D
+    /// (horizontal) queda a distancia D hacia abajo. Pero los pies están a
+    /// AlturaHastaPies del centro; si D es menor, el Jugador se hunde en el
+    /// piso, y si es mayor, flota. La corrección es D - AlturaHastaPies.
+    /// </summary>
+    public bool ObtenerCorreccionVertical(Vector3 direccionMundial, out float correccion)
+    {
+        correccion = 0f;
+        Vector3 dir = direccionMundial.normalized;
+        float distanciaPared;
+
+        // Distancia exacta a la superficie de la pared (rayo fino desde el centro).
+        if (Physics.Raycast(jugador.position, dir, out RaycastHit golpeRayo,
+                distanciaDeteccion + radioDeteccion + 0.1f, capaParedes, QueryTriggerInteraction.Collide))
+        {
+            distanciaPared = golpeRayo.distance;
+        }
+        else if (Intentar(dir, out RaycastHit golpeEsfera))
+        {
+            // Respaldo: si el rayo fino no tocó (esquina), usamos el SphereCast.
+            distanciaPared = golpeEsfera.distance + radioDeteccion;
+        }
+        else
+        {
+            return false;
+        }
+
+        correccion = distanciaPared - AlturaHastaPies;
         return true;
     }
 

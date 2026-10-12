@@ -57,7 +57,10 @@ public class RotadorMundo : MonoBehaviour
         }
 
         if (sensor.ObtenerRotacionParaDireccion(direccionMundial, out Vector3 eje, out float grados))
-            IniciarRotacion(eje, grados);
+        {
+            sensor.ObtenerCorreccionVertical(direccionMundial, out float correccion);
+            IniciarRotacion(eje, grados, correccion);
+        }
         else
             Debug.LogWarning("[RotadorMundo] El sensor no encontró pared en esa dirección, no se rota.", this);
     }
@@ -66,23 +69,29 @@ public class RotadorMundo : MonoBehaviour
     /// Rota el Mundo alrededor del Jugador con un (eje, grados) ya calculado
     /// por quien llama (ej. ClicParaRotar con su propio sensor). No depende
     /// del campo 'sensor' de este componente.
+    ///
+    /// 'correccionVertical' (opcional): cuánto subir (+) o bajar (-) el Mundo
+    /// durante el mismo giro para que la pared que pasa a ser piso quede
+    /// EXACTAMENTE bajo los pies del Jugador, en vez de hundirlo o dejarlo
+    /// flotando. Se calcula con SensorPisoRotacion.ObtenerCorreccionVertical.
+    /// Para giros que no cambian el piso (A/D) se deja en 0.
     /// </summary>
-    public void Rotar(Vector3 eje, float grados)
+    public void Rotar(Vector3 eje, float grados, float correccionVertical = 0f)
     {
         if (rotando) return;
 
         if (jugador == null)
             Debug.LogWarning("[RotadorMundo] El campo 'Jugador' está vacío: el Mundo va a rotar alrededor de su propio centro, no del Player.", this);
 
-        IniciarRotacion(eje, grados);
+        IniciarRotacion(eje, grados, correccionVertical);
     }
 
-    private void IniciarRotacion(Vector3 eje, float grados)
+    private void IniciarRotacion(Vector3 eje, float grados, float correccionVertical)
     {
-        StartCoroutine(RotarSuave(eje, grados));
+        StartCoroutine(RotarSuave(eje, grados, correccionVertical));
     }
 
-    private IEnumerator RotarSuave(Vector3 eje, float grados)
+    private IEnumerator RotarSuave(Vector3 eje, float grados, float correccionVertical)
     {
         rotando = true;
 
@@ -94,6 +103,7 @@ public class RotadorMundo : MonoBehaviour
         Vector3 posicionInicial = transform.position;
         Quaternion rotacionInicial = transform.rotation;
         Quaternion deltaFinal = Quaternion.AngleAxis(grados, eje);
+        Vector3 correccion = Vector3.up * correccionVertical;
 
         float tiempoTranscurrido = 0f;
 
@@ -105,14 +115,16 @@ public class RotadorMundo : MonoBehaviour
 
             Quaternion deltaActual = Quaternion.Slerp(Quaternion.identity, deltaFinal, tCurva);
 
-            transform.position = pivote + deltaActual * (posicionInicial - pivote);
+            // La corrección vertical se aplica de a poco, junto con el giro,
+            // para que el piso nuevo termine justo bajo los pies sin saltos.
+            transform.position = pivote + deltaActual * (posicionInicial - pivote) + correccion * tCurva;
             transform.rotation = deltaActual * rotacionInicial;
 
             yield return null;
         }
 
         // Snap final exacto para evitar arrastre de error de punto flotante
-        transform.position = pivote + deltaFinal * (posicionInicial - pivote);
+        transform.position = pivote + deltaFinal * (posicionInicial - pivote) + correccion;
         transform.rotation = deltaFinal * rotacionInicial;
         rotando = false;
 
