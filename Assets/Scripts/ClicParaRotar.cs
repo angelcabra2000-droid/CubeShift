@@ -31,6 +31,10 @@ public class ClicParaRotar : MonoBehaviour
     [Tooltip("Distancia máxima del raycast del mouse.")]
     [SerializeField] private float distanciaMaxima = 100f;
 
+    [Header("Depuración")]
+    [Tooltip("Imprime en la Console qué atraviesa el click. Útil para ver por qué no rota.")]
+    [SerializeField] private bool depurar = true;
+
     private void Awake()
     {
         if (camara == null) camara = Camera.main;
@@ -43,11 +47,31 @@ public class ClicParaRotar : MonoBehaviour
         if (rotadorMundo.EstaRotando) return;
 
         Ray rayo = camara.ScreenPointToRay(Input.mousePosition);
-        if (!Physics.Raycast(rayo, out RaycastHit hit, distanciaMaxima, capaParedes)) return;
 
-        if (sensor.DireccionParaPared(hit.collider, out Vector3 direccion))
-            rotadorMundo.SolicitarRotacionHacia(direccion);
-        // Si el click no cayó sobre ninguna de las 4 paredes resaltadas
-        // actuales, no pasa nada (click "en el aire" o sobre una pared no válida).
+        // RaycastAll en vez de Raycast: el rayo atraviesa TODAS las paredes
+        // que haya en el camino, no solo la primera. Esto importa porque
+        // OcultarParedesEntreCamaraYPlayer apaga el Renderer de las paredes
+        // que tapan al jugador pero su Collider sigue ahí (invisible), y un
+        // Raycast normal se detendría en esa pared fantasma en vez de llegar
+        // a la pared resaltada de verdad.
+        RaycastHit[] impactos = Physics.RaycastAll(
+            rayo, distanciaMaxima, capaParedes, QueryTriggerInteraction.Collide);
+
+        if (depurar)
+            Debug.Log($"[ClicParaRotar] El rayo atravesó {impactos.Length} colliders.");
+
+        foreach (RaycastHit impacto in impactos)
+        {
+            if (sensor.DireccionParaPared(impacto.collider, out Vector3 direccion)
+                && sensor.ObtenerRotacionParaDireccion(direccion, out Vector3 eje, out float grados))
+            {
+                if (depurar) Debug.Log($"[ClicParaRotar] Pared válida: {impacto.collider.name}. Rotando eje={eje}, grados={grados}.");
+                rotadorMundo.Rotar(eje, grados);
+                return;
+            }
+        }
+
+        if (depurar)
+            Debug.Log("[ClicParaRotar] Ninguno de los colliders del rayo es una de las 4 paredes candidatas ahora mismo.");
     }
 }

@@ -1,11 +1,14 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
 /// Movimiento del Jugador, todo con W/A/S/D (ya no se usan las flechas):
-///   W / S -> avanzar / retroceder a lo largo de transform.forward
-///   A / D -> girar 90° en el lugar hacia la izquierda / derecha
+///   W / S -> avanzar / retroceder hacia adentro / afuera de la pantalla
+///            (sensor.Adelante, que sale de la vista de cámara actual)
+///   A / D -> "mirar" a la izquierda / derecha, pero SIN girar al Jugador:
+///            lo que gira es el Mundo, alrededor del eje vertical del
+///            Jugador y en sentido contrario (si mirás a la izquierda, el
+///            Mundo gira hacia la derecha). El Jugador nunca rota.
 ///
 /// La rotación del Mundo ya NO se dispara con teclado — eso ahora lo hace
 /// ClicParaRotar, al clickear una de las paredes que este script resalta.
@@ -49,12 +52,6 @@ public class MovimientoJugador : MonoBehaviour
     [Tooltip("Material que se asigna temporalmente a una pared mientras rotar hacia ella sea válido.")]
     [SerializeField] private Material materialResaltado;
 
-    [Header("Giro en el lugar (Flecha Izquierda / Flecha Derecha)")]
-    [Tooltip("Gira al Jugador 90° sobre su PROPIO eje (no toca el Mundo), para poder encarar los pasillos de los costados. El avance/retroceso (Flecha Arriba/Abajo) siempre es a lo largo de hacia donde esté mirando.")]
-    [SerializeField] private float duracionGiroJugador = 0.2f;
-
-    private bool girando = false;
-
     // Guarda el material ORIGINAL de cada pared que resaltamos, para devolvérselo después.
     private readonly Dictionary<Renderer, Material> materialesOriginales = new Dictionary<Renderer, Material>();
     private readonly HashSet<Renderer> resaltadasEsteFrame = new HashSet<Renderer>();
@@ -73,14 +70,16 @@ public class MovimientoJugador : MonoBehaviour
             return;
         }
 
-        if (girando)
+        // "Mirar" a un lado = girar el MUNDO en sentido contrario, alrededor
+        // del eje vertical que pasa por el Jugador. En Unity un ángulo
+        // positivo sobre Vector3.up gira en sentido horario visto desde
+        // arriba, así que: A (mirar izquierda) -> Mundo +90°, D (mirar
+        // derecha) -> Mundo -90°. Si lo sentís al revés, invertí los signos.
+        if (rotadorMundo != null)
         {
-            QuitarTodosLosResaltados();
-            return;
+            if (Input.GetKeyDown(KeyCode.A)) { rotadorMundo.Rotar(Vector3.up, 90f); return; }
+            if (Input.GetKeyDown(KeyCode.D)) { rotadorMundo.Rotar(Vector3.up, -90f); return; }
         }
-
-        if (Input.GetKeyDown(KeyCode.A)) StartCoroutine(GirarEnElLugar(-90f));
-        else if (Input.GetKeyDown(KeyCode.D)) StartCoroutine(GirarEnElLugar(90f));
 
         bool bloqueado = MoverJugador();
 
@@ -95,10 +94,14 @@ public class MovimientoJugador : MonoBehaviour
         if (Input.GetKey(KeyCode.W)) entrada = 1f;
         else if (Input.GetKey(KeyCode.S)) entrada = -1f;
 
-        if (Mathf.Approximately(entrada, 0f))
-            return HayParedEnDireccion(transform.forward) || HayParedEnDireccion(-transform.forward);
+        // "Adelante" = hacia adentro de la pantalla según la vista de cámara
+        // actual (el Jugador nunca rota, así que su propio forward no sirve).
+        Vector3 adelante = sensor.Adelante;
 
-        Vector3 direccion = transform.forward * entrada;
+        if (Mathf.Approximately(entrada, 0f))
+            return HayParedEnDireccion(adelante) || HayParedEnDireccion(-adelante);
+
+        Vector3 direccion = adelante * entrada;
 
         if (HayParedEnDireccion(direccion))
             return true;
@@ -158,26 +161,5 @@ public class MovimientoJugador : MonoBehaviour
         bufferRestaurar.Clear();
         bufferRestaurar.AddRange(materialesOriginales.Keys);
         foreach (var rend in bufferRestaurar) Restaurar(rend);
-    }
-
-    /// <summary>Gira al Jugador 'grados' sobre su propio eje vertical (transform.up), sin tocar el Mundo.</summary>
-    private IEnumerator GirarEnElLugar(float grados)
-    {
-        girando = true;
-
-        Quaternion rotacionInicial = transform.rotation;
-        Quaternion rotacionFinal = rotacionInicial * Quaternion.AngleAxis(grados, Vector3.up);
-
-        float tiempoTranscurrido = 0f;
-        while (tiempoTranscurrido < duracionGiroJugador)
-        {
-            tiempoTranscurrido += Time.deltaTime;
-            float t = Mathf.Clamp01(tiempoTranscurrido / duracionGiroJugador);
-            transform.rotation = Quaternion.Slerp(rotacionInicial, rotacionFinal, t);
-            yield return null;
-        }
-
-        transform.rotation = rotacionFinal;
-        girando = false;
     }
 }

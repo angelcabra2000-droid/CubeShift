@@ -28,6 +28,9 @@ public class SensorPisoRotacion : MonoBehaviour
     [Tooltip("Si se deja vacío, se usa este mismo transform (el del Jugador).")]
     [SerializeField] private Transform jugador;
 
+    [Tooltip("La cámara (script CamaraVertices). Si se asigna, 'adelante/atrás/izquierda/derecha' son relativos a hacia dónde mira la vista actual. Si se deja vacío, se usan los ejes del propio Jugador.")]
+    [SerializeField] private CamaraVertices camaraReferencia;
+
     [Header("Detección")]
     [Tooltip("Layer que usan las paredes/geometría del laberinto.")]
     [SerializeField] private LayerMask capaParedes;
@@ -41,7 +44,41 @@ public class SensorPisoRotacion : MonoBehaviour
     private void Awake()
     {
         if (jugador == null) jugador = transform;
+
+        // Si no asignaste la cámara a mano, la buscamos sola (Main Camera).
+        if (camaraReferencia == null && Camera.main != null)
+            camaraReferencia = Camera.main.GetComponent<CamaraVertices>();
     }
+
+    /// <summary>
+    /// Dirección mundial de "adelante": hacia adentro de la pantalla (W = se
+    /// aleja de la cámara, S = se acerca). Sale de CamaraVertices si está
+    /// disponible; si no, de hacia dónde apunta Camera.main (aplanado y
+    /// ajustado al eje más cercano); y como último recurso, del propio Jugador.
+    /// </summary>
+    public Vector3 Adelante
+    {
+        get
+        {
+            if (camaraReferencia != null) return camaraReferencia.Adelante;
+
+            Camera cam = Camera.main;
+            if (cam != null)
+            {
+                Vector3 f = cam.transform.forward;
+                f.y = 0f;
+                if (f.sqrMagnitude > 0.0001f)
+                    return Mathf.Abs(f.x) > Mathf.Abs(f.z)
+                        ? new Vector3(Mathf.Sign(f.x), 0f, 0f)
+                        : new Vector3(0f, 0f, Mathf.Sign(f.z));
+            }
+
+            return jugador.forward;
+        }
+    }
+
+    /// <summary>Dirección mundial de "derecha" (hacia la derecha de la pantalla).</summary>
+    public Vector3 Derecha => Vector3.Cross(Vector3.up, Adelante);
 
     public bool PuedeIrAdelante() => IntentarAdelante(out _);
     public bool PuedeIrAtras() => IntentarAtras(out _);
@@ -49,10 +86,10 @@ public class SensorPisoRotacion : MonoBehaviour
     public bool PuedeIrDerecha() => IntentarDerecha(out _);
 
     /// <summary>Igual que PuedeIrX, pero además devuelve el impacto (para poder resaltar la pared encontrada).</summary>
-    public bool IntentarAdelante(out RaycastHit hit) => Intentar(jugador.forward, out hit);
-    public bool IntentarAtras(out RaycastHit hit) => Intentar(-jugador.forward, out hit);
-    public bool IntentarIzquierda(out RaycastHit hit) => Intentar(-jugador.right, out hit);
-    public bool IntentarDerecha(out RaycastHit hit) => Intentar(jugador.right, out hit);
+    public bool IntentarAdelante(out RaycastHit hit) => Intentar(Adelante, out hit);
+    public bool IntentarAtras(out RaycastHit hit) => Intentar(-Adelante, out hit);
+    public bool IntentarIzquierda(out RaycastHit hit) => Intentar(-Derecha, out hit);
+    public bool IntentarDerecha(out RaycastHit hit) => Intentar(Derecha, out hit);
 
     private bool Intentar(Vector3 direccion, out RaycastHit hit)
     {
@@ -92,10 +129,10 @@ public class SensorPisoRotacion : MonoBehaviour
     {
         if (pared != null)
         {
-            if (Intentar(jugador.forward, out RaycastHit h) && h.collider == pared) { direccionMundial = jugador.forward; return true; }
-            if (Intentar(-jugador.forward, out h) && h.collider == pared) { direccionMundial = -jugador.forward; return true; }
-            if (Intentar(-jugador.right, out h) && h.collider == pared) { direccionMundial = -jugador.right; return true; }
-            if (Intentar(jugador.right, out h) && h.collider == pared) { direccionMundial = jugador.right; return true; }
+            if (Intentar(Adelante, out RaycastHit h) && h.collider == pared) { direccionMundial = Adelante; return true; }
+            if (Intentar(-Adelante, out h) && h.collider == pared) { direccionMundial = -Adelante; return true; }
+            if (Intentar(-Derecha, out h) && h.collider == pared) { direccionMundial = -Derecha; return true; }
+            if (Intentar(Derecha, out h) && h.collider == pared) { direccionMundial = Derecha; return true; }
         }
         direccionMundial = Vector3.zero;
         return false;
@@ -105,10 +142,10 @@ public class SensorPisoRotacion : MonoBehaviour
     private void OnDrawGizmosSelected()
     {
         if (jugador == null) jugador = transform;
-        Dibujar(jugador.forward, Application.isPlaying && PuedeIrAdelante());
-        Dibujar(-jugador.forward, Application.isPlaying && PuedeIrAtras());
-        Dibujar(jugador.right, Application.isPlaying && PuedeIrDerecha());
-        Dibujar(-jugador.right, Application.isPlaying && PuedeIrIzquierda());
+        Dibujar(Adelante, Application.isPlaying && PuedeIrAdelante());
+        Dibujar(-Adelante, Application.isPlaying && PuedeIrAtras());
+        Dibujar(Derecha, Application.isPlaying && PuedeIrDerecha());
+        Dibujar(-Derecha, Application.isPlaying && PuedeIrIzquierda());
     }
 
     private void Dibujar(Vector3 direccion, bool valido)

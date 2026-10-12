@@ -48,10 +48,33 @@ public class RotadorMundo : MonoBehaviour
     /// </summary>
     public void SolicitarRotacionHacia(Vector3 direccionMundial)
     {
-        if (rotando || sensor == null) return;
+        if (rotando) return;
+
+        if (sensor == null)
+        {
+            Debug.LogWarning("[RotadorMundo] El campo 'Sensor' está vacío en el Inspector de este objeto: no puedo calcular la rotación. (ClicParaRotar usa Rotar(eje, grados) y no depende de este campo.)", this);
+            return;
+        }
 
         if (sensor.ObtenerRotacionParaDireccion(direccionMundial, out Vector3 eje, out float grados))
             IniciarRotacion(eje, grados);
+        else
+            Debug.LogWarning("[RotadorMundo] El sensor no encontró pared en esa dirección, no se rota.", this);
+    }
+
+    /// <summary>
+    /// Rota el Mundo alrededor del Jugador con un (eje, grados) ya calculado
+    /// por quien llama (ej. ClicParaRotar con su propio sensor). No depende
+    /// del campo 'sensor' de este componente.
+    /// </summary>
+    public void Rotar(Vector3 eje, float grados)
+    {
+        if (rotando) return;
+
+        if (jugador == null)
+            Debug.LogWarning("[RotadorMundo] El campo 'Jugador' está vacío: el Mundo va a rotar alrededor de su propio centro, no del Player.", this);
+
+        IniciarRotacion(eje, grados);
     }
 
     private void IniciarRotacion(Vector3 eje, float grados)

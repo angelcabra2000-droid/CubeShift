@@ -48,23 +48,34 @@ public class CamaraVertices : MonoBehaviour
     [Tooltip("Vista (1-4) donde arranca la cámara.")]
     [SerializeField] private int vistaInicial = 1;
 
-    private Vector3[] direcciones;
+    // Las 4 direcciones horizontales (sin componente Y): frente, derecha,
+    // atrás, izquierda. Todas a la misma altura que el objetivo.
+    // Se crean AL DECLARAR el campo (no en Start) para que existan siempre,
+    // incluso en modo edición o si otro script las consulta antes del Start.
+    private readonly Vector3[] direcciones = new Vector3[4]
+    {
+        new Vector3(0, 0, -1), // 1: de frente
+        new Vector3(1, 0, 0),  // 2: derecha
+        new Vector3(0, 0, 1),  // 3: atrás
+        new Vector3(-1, 0, 0), // 4: izquierda
+    };
+
     private bool moviendo = false;
     private int vistaActual;
 
+    // Índice de vista SIEMPRE válido (0 a 3). En modo edición usa la
+    // "Vista Inicial" del Inspector, porque vistaActual aún no se calculó.
+    private int IndiceVista =>
+        Mathf.Clamp(Application.isPlaying ? vistaActual : vistaInicial - 1, 0, direcciones.Length - 1);
+
+    void Awake()
+    {
+        // Se calcula en Awake (antes que cualquier Start/Update de otros scripts).
+        vistaActual = Mathf.Clamp(vistaInicial, 1, direcciones.Length) - 1;
+    }
+
     void Start()
     {
-        // Las 4 direcciones horizontales (sin componente Y): frente, derecha,
-        // atrás, izquierda. Todas a la misma altura que el objetivo.
-        direcciones = new Vector3[4]
-        {
-            new Vector3(0, 0, -1), // 1: de frente
-            new Vector3(1, 0, 0),  // 2: derecha
-            new Vector3(0, 0, 1),  // 3: atrás
-            new Vector3(-1, 0, 0), // 4: izquierda
-        };
-
-        vistaActual = Mathf.Clamp(vistaInicial, 1, 4) - 1;
         Vector3 posInicial = ObtenerPosicionVista(vistaActual);
         transform.position = posInicial;
         transform.rotation = Quaternion.LookRotation((ObjetivoPos() - posInicial).normalized);
@@ -88,10 +99,20 @@ public class CamaraVertices : MonoBehaviour
         if (moviendo) return;
 
         Vector3 objetivoPos = ObjetivoPos();
-        Vector3 posActual = objetivoPos + direcciones[vistaActual] * distancia;
+        Vector3 posActual = objetivoPos + direcciones[IndiceVista] * distancia;
         transform.position = posActual;
         transform.rotation = Quaternion.LookRotation((objetivoPos - posActual).normalized);
     }
+
+    /// <summary>
+    /// Hacia dónde "mira" la vista actual (horizontal, hacia adentro de la
+    /// pantalla). Se usa como "adelante" del Jugador, que nunca rota. Usa la
+    /// vista de DESTINO, así no cambia a mitad de una transición.
+    /// </summary>
+    public Vector3 Adelante => -direcciones[IndiceVista];
+
+    /// <summary>Hacia la derecha de la pantalla en la vista actual.</summary>
+    public Vector3 Derecha => Vector3.Cross(Vector3.up, Adelante);
 
     private Vector3 ObjetivoPos() => objetivo != null ? objetivo.position : Vector3.zero;
 
