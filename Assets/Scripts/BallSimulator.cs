@@ -1,15 +1,35 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>
+/// Pelota con física propia (sin Rigidbody) dentro del Mundo que rota.
+///
+/// NO necesita WorldRotator: lee directamente la pose (posición/rotación)
+/// del Transform "Mundo", que es la que mueve RotadorMundo. Así RotadorMundo,
+/// MovimientoJugador y el resto de scripts quedan exactamente como están.
+///
+/// Se simula en LateUpdate (después de que RotadorMundo y MovimientoJugador
+/// ya movieron al Mundo y al Jugador en este frame) y cada frame se divide en
+/// subpasos. Dentro del frame se interpolan la pose del Mundo y la posición del
+/// Jugador, y de esa interpolación sale la VELOCIDAD de cada pared (para que
+/// la fricción y el rebote contra paredes en movimiento sean correctos).
+///
+/// Colocar sobre la esfera. La esfera NO debe ser hija del Mundo, NO debe
+/// tener Rigidbody y NO debe estar en el Layer "Paredes".
+/// </summary>
 public class BallSimulator : MonoBehaviour
 {
     [Header("Referencias")]
-    [SerializeField] private WorldRotator world;
-    [SerializeField] private CapsuleCollider player;      // solo se usa como dato geométrico
+    [Tooltip("El GameObject 'Mundo' (el que tiene RotadorMundo).")]
+    [SerializeField] private Transform mundo;
+    [Tooltip("CapsuleCollider del Jugador (se usa como cuerpo con el que choca la pelota).")]
+    [SerializeField] private CapsuleCollider player;
 
     [Header("Cuerpo")]
     [SerializeField] private float mass = 1f;
-    [SerializeField] private float radius = 0.5f;         // = escala / 2 (esfera por defecto: 0.5)
+    [Tooltip("Si está activo, el radio se toma de la escala de la esfera (escala/2).")]
+    [SerializeField] private bool radioDesdeEscala = true;
+    [SerializeField] private float radius = 0.5f;
 
     [Header("Ambiente")]
     [SerializeField] private float gravity = 20f;
@@ -26,8 +46,14 @@ public class BallSimulator : MonoBehaviour
     [SerializeField] private float positionSlop = 0.001f;
 
     [Header("Integración")]
-    [SerializeField] private int substeps = 4;
+    [Tooltip("Tiempo máximo de cada subpaso (s).")]
+    [SerializeField] private float maxPasoTiempo = 0.005f;
+    [Tooltip("Máximo desplazamiento relativo por subpaso, en radios de la pelota. Evita atravesar paredes delgadas.")]
+    [SerializeField] private float maxMovPorPasoRadios = 0.25f;
+    [SerializeField] private int maxSubpasos = 300;
     [SerializeField] private int solverIterations = 4;
+    [Tooltip("Si un frame dura más que esto, se simula solo este tiempo (evita saltos tras una pausa).")]
+    [SerializeField] private float maxDtFrame = 0.05f;
 
     // Estado
     public Vector3 Velocity;
@@ -35,45 +61,158 @@ public class BallSimulator : MonoBehaviour
     private Vector3 pos;
     private Quaternion orientation = Quaternion.identity;
 
-    private struct Box { public Vector3 min, max; }
-    private struct Contact { public Vector3 n, point, surfaceVel; public float depth; }
+    // Cajas en el marco RÍGIDO del Mundo (posición/rotación del Mundo, sin escala)
+    private struct Box { public Vector3 center; public Quaternion rot; public Vector3 half; }
+    private struct Contact { public Vector3 n, point, surfaceVel; public float depth; public bool wall; }
 
     private readonly List<Box> boxes = new();
+    private readonly List<Vector3> corners = new();
     private readonly List<Contact> contacts = new();
+
+    // Pose del Mundo en el subpaso actual y en el anterior
+    private Vector3 wPos, wPosPrev;
+    private Quaternion wRot = Quaternion.identity, wRotPrev = Quaternion.identity;
+    // Pose al final del frame anterior
+    private Vector3 prevFrameWPos, prevFramePPos;
+    private Quaternion prevFrameWRot = Quaternion.identity;
+
+    private Vector3 playerOffset;   // cuánto falta para llegar a la posición final del Jugador en este frame
+    private Vector3 playerVel;
+    private float stepH = 0.005f;
     private bool grounded;
 
     void Start()
     {
+        if (mundo == null)
+        {
+            Debug.LogError("[BallSimulator] Falta asignar 'Mundo' en el Inspector.", this);
+            enabled = false;
+            return;
+        }
+
         pos = transform.position;
         orientation = transform.rotation;
 
-        // Cajas de las paredes en el espacio LOCAL del Mundo.
-        // Supone: escala 1 en el Mundo y BoxColliders sin rotar respecto a él.
-        foreach (var bc in world.GetComponentsInChildren<BoxCollider>())
+        if (radioDesdeEscala)
         {
-            Vector3 c = world.transform.InverseTransformPoint(bc.transform.TransformPoint(bc.center));
-            Vector3 half = Vector3.Scale(bc.size, bc.transform.lossyScale) * 0.5f;
-            half = new Vector3(Mathf.Abs(half.x), Mathf.Abs(half.y), Mathf.Abs(half.z));
-            boxes.Add(new Box { min = c - half, max = c + half });
+            Vector3 s = transform.lossyScale;
+            radius = 0.5f * Mathf.Max(s.x, Mathf.Max(s.y, s.z));
         }
+
+        Vector3 wp = mundo.position;
+        Quaternion wr = mundo.rotation;
+        Quaternion wrInv = Quaternion.Inverse(wr);
+
+        int nCajas = 0, nAprox = 0;
+        foreach (var col in mundo.GetComponentsInChildren<Collider>())
+        {
+            // Los colliders con Is Trigger TAMBIÉN cuentan como pared: en este proyecto
+            // el sensor y el jugador ya detectan las paredes con raycasts, así que es
+            // normal que sean triggers.
+            if (col == player) continue;
+            if (col.transform.IsChildOf(transform)) continue;     // colliders de la propia pelota
+
+            if (col is BoxCollider bc)
+            {
+                Vector3 cW = bc.transform.TransformPoint(bc.center);
+                Vector3 half = Vector3.Scale(bc.size, bc.transform.lossyScale) * 0.5f;
+                half = new Vector3(Mathf.Abs(half.x), Mathf.Abs(half.y), Mathf.Abs(half.z));
+                AddBox(wrInv * (cW - wp), wrInv * bc.transform.rotation, half);
+                nCajas++;
+            }
+            else
+            {
+                // Otro tipo de collider (Plane, Quad, Mesh...): se aproxima con su caja envolvente.
+                Bounds b = col.bounds;
+                AddBox(wrInv * (b.center - wp), wrInv, b.extents);
+                nAprox++;
+                Debug.LogWarning($"[BallSimulator] '{col.name}' no es BoxCollider ({col.GetType().Name}); se aproxima con su caja envolvente. Mejor usa un Cube con BoxCollider.", col);
+            }
+        }
+
+        Debug.Log($"[BallSimulator] Paredes cargadas: {nCajas} BoxCollider + {nAprox} aproximadas. Radio = {radius:F3}");
+        if (nCajas + nAprox == 0)
+            Debug.LogError("[BallSimulator] No encontré NINGÚN collider hijo de 'Mundo'. La pelota atravesará todo.", this);
+
+        prevFrameWPos = wp;
+        prevFrameWRot = wr;
+        prevFramePPos = player != null ? player.transform.position : Vector3.zero;
     }
 
-    void FixedUpdate()
+    void AddBox(Vector3 center, Quaternion rot, Vector3 half)
     {
-        float h = Time.fixedDeltaTime / substeps;
-        grounded = false;
+        boxes.Add(new Box { center = center, rot = rot, half = half });
+        for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    corners.Add(center + rot * Vector3.Scale(half, new Vector3(sx, sy, sz)));
+    }
 
-        for (int i = 0; i < substeps; i++)
+    // LateUpdate: ya se movieron el Mundo (RotadorMundo) y el Jugador (MovimientoJugador) en este frame.
+    void LateUpdate()
+    {
+        float dt = Mathf.Min(Time.deltaTime, maxDtFrame);
+        if (dt <= 1e-6f) return;   // juego en pausa
+
+        Vector3 wPos1 = mundo.position;
+        Quaternion wRot1 = mundo.rotation;
+        Vector3 pPos1 = player != null ? player.transform.position : Vector3.zero;
+
+        // Cuánto se movió la pared que más se movió + la pelota + el jugador -> cuántos subpasos hacen falta
+        float movMundo = MaxCornerDisplacement(prevFrameWPos, prevFrameWRot, wPos1, wRot1);
+        Vector3 dPlayer = pPos1 - prevFramePPos;
+        playerVel = dPlayer / dt;
+
+        float movTotal = Velocity.magnitude * dt + movMundo + dPlayer.magnitude;
+        int n = Mathf.CeilToInt(Mathf.Max(dt / maxPasoTiempo, movTotal / (radius * maxMovPorPasoRadios)));
+        n = Mathf.Clamp(n, 1, maxSubpasos);
+        float h = dt / n;
+        stepH = h;
+
+        wPos = prevFrameWPos;
+        wRot = prevFrameWRot;
+
+        for (int i = 1; i <= n; i++)
         {
-            world.Advance(h);        // 1) mover las paredes
-            Integrate(h);            // 2) gravedad + aire
-            SolveContacts();         // 3) normal + fricción
-            if (grounded)            // 4) resistencia a la rodadura
+            float s = (float)i / n;
+            wPosPrev = wPos;
+            wRotPrev = wRot;
+            wPos = Vector3.Lerp(prevFrameWPos, wPos1, s);
+            wRot = Quaternion.Slerp(prevFrameWRot, wRot1, s);
+            playerOffset = Vector3.Lerp(prevFramePPos, pPos1, s) - pPos1;
+
+            grounded = false;
+            Integrate(h);            // gravedad + aire
+            SolveContacts();         // normal + fricción (paredes y jugador)
+            if (grounded)            // resistencia a la rodadura
                 AngularVelocity *= Mathf.Max(0f, 1f - rollingDamping * h);
             IntegrateOrientation(h);
         }
 
         transform.SetPositionAndRotation(pos, orientation);
+
+        prevFrameWPos = wPos1;
+        prevFrameWRot = wRot1;
+        prevFramePPos = pPos1;
+    }
+
+    float MaxCornerDisplacement(Vector3 p0, Quaternion r0, Vector3 p1, Quaternion r1)
+    {
+        float m = 0f;
+        foreach (var L in corners)
+        {
+            float d = ((p1 + r1 * L) - (p0 + r0 * L)).magnitude;
+            if (d > m) m = d;
+        }
+        return m;
+    }
+
+    // Velocidad de un punto del Mundo (mundial) en el subpaso actual
+    Vector3 SurfaceVelocityAt(Vector3 p)
+    {
+        Vector3 L = Quaternion.Inverse(wRot) * (p - wPos);   // punto fijo al Mundo
+        Vector3 antes = wPosPrev + wRotPrev * L;
+        return (p - antes) / stepH;
     }
 
     // ---------- Integración (Euler semi-implícito) ----------
@@ -97,62 +236,75 @@ public class BallSimulator : MonoBehaviour
     }
 
     // ---------- Detección ----------
-    void GatherContacts()
+    void GatherContacts(bool conParedes, bool conJugador)
     {
         contacts.Clear();
 
-        // Paredes: esfera vs caja, en el espacio local del Mundo
-        Vector3 c = world.transform.InverseTransformPoint(pos);
-        foreach (var b in boxes)
-        {
-            Vector3 q = new Vector3(
-                Mathf.Clamp(c.x, b.min.x, b.max.x),
-                Mathf.Clamp(c.y, b.min.y, b.max.y),
-                Mathf.Clamp(c.z, b.min.z, b.max.z));
-            Vector3 d = c - q;
-            float dist2 = d.sqrMagnitude;
-            if (dist2 > radius * radius) continue;
-
-            Vector3 nLocal; float depth;
-            if (dist2 > 1e-10f)
+        // Paredes: esfera vs caja orientada (OBB), en el marco de cada caja
+        if (conParedes)
+            foreach (var b in boxes)
             {
-                float dist = Mathf.Sqrt(dist2);
-                nLocal = d / dist;
-                depth = radius - dist;
+                Quaternion rW = wRot * b.rot;
+                Vector3 cW = wPos + wRot * b.center;
+                Vector3 c = Quaternion.Inverse(rW) * (pos - cW);
+
+                Vector3 q = new Vector3(
+                    Mathf.Clamp(c.x, -b.half.x, b.half.x),
+                    Mathf.Clamp(c.y, -b.half.y, b.half.y),
+                    Mathf.Clamp(c.z, -b.half.z, b.half.z));
+                Vector3 d = c - q;
+                float dist2 = d.sqrMagnitude;
+                if (dist2 > radius * radius) continue;
+
+                Vector3 nBox; float depth;
+                if (dist2 > 1e-10f)
+                {
+                    float dist = Mathf.Sqrt(dist2);
+                    nBox = d / dist;
+                    depth = radius - dist;
+                }
+                else
+                {
+                    // Centro dentro de la caja: salir por la cara más cercana
+                    Vector3 lo = c + b.half, hi = b.half - c;
+                    float m = lo.x; nBox = Vector3.left;
+                    if (hi.x < m) { m = hi.x; nBox = Vector3.right; }
+                    if (lo.y < m) { m = lo.y; nBox = Vector3.down; }
+                    if (hi.y < m) { m = hi.y; nBox = Vector3.up; }
+                    if (lo.z < m) { m = lo.z; nBox = Vector3.back; }
+                    if (hi.z < m) { m = hi.z; nBox = Vector3.forward; }
+                    depth = radius + m;
+                }
+
+                Vector3 n = rW * nBox;
+                Vector3 p = pos - n * radius;
+                contacts.Add(new Contact
+                {
+                    n = n,
+                    point = p,
+                    depth = depth,
+                    surfaceVel = SurfaceVelocityAt(p),
+                    wall = true
+                });
             }
-            else
-            {
-                // Centro dentro de la caja: salir por la cara más cercana
-                Vector3 lo = c - b.min, hi = b.max - c;
-                float m = lo.x; nLocal = Vector3.left;
-                if (hi.x < m) { m = hi.x; nLocal = Vector3.right; }
-                if (lo.y < m) { m = lo.y; nLocal = Vector3.down; }
-                if (hi.y < m) { m = hi.y; nLocal = Vector3.up; }
-                if (lo.z < m) { m = lo.z; nLocal = Vector3.back; }
-                if (hi.z < m) { m = hi.z; nLocal = Vector3.forward; }
-                depth = radius + m;
-            }
 
-            Vector3 n = world.transform.TransformDirection(nLocal);
-            Vector3 p = pos - n * radius;
-            contacts.Add(new Contact
-            {
-                n = n,
-                point = p,
-                depth = depth,
-                surfaceVel = world.SurfaceVelocityAt(p)
-            });
-        }
-
-        // Jugador: esfera vs cápsula (el jugador está fijo en el marco inercial)
-        if (player != null)
+        // Jugador: esfera vs cápsula. El jugador se mueve (MovimientoJugador), así que
+        // su velocidad se transfiere a la pelota al empujarla.
+        if (conJugador && player != null)
         {
             Transform pt = player.transform;
-            Vector3 up = pt.up;
-            Vector3 center = pt.TransformPoint(player.center);
-            float pr = player.radius * Mathf.Max(pt.lossyScale.x, pt.lossyScale.z);
-            float half = Mathf.Max(0f, player.height * pt.lossyScale.y * 0.5f - pr);
-            Vector3 a = center - up * half, bPt = center + up * half;
+            Vector3 ls = pt.lossyScale;
+            Vector3 axis; float pr, lenScale;
+            switch (player.direction)
+            {
+                case 0: axis = pt.right; pr = player.radius * Mathf.Max(ls.y, ls.z); lenScale = ls.x; break;
+                case 2: axis = pt.forward; pr = player.radius * Mathf.Max(ls.x, ls.y); lenScale = ls.z; break;
+                default: axis = pt.up; pr = player.radius * Mathf.Max(ls.x, ls.z); lenScale = ls.y; break;
+            }
+
+            Vector3 center = pt.TransformPoint(player.center) + playerOffset;
+            float half = Mathf.Max(0f, player.height * lenScale * 0.5f - pr);
+            Vector3 a = center - axis * half, bPt = center + axis * half;
 
             Vector3 ab = bPt - a;
             float tt = ab.sqrMagnitude > 1e-8f ? Mathf.Clamp01(Vector3.Dot(pos - a, ab) / ab.sqrMagnitude) : 0f;
@@ -167,7 +319,7 @@ public class BallSimulator : MonoBehaviour
                     n = n,
                     point = pos - n * radius,
                     depth = sum - dist,
-                    surfaceVel = Vector3.zero
+                    surfaceVel = playerVel
                 });
             }
         }
@@ -176,18 +328,29 @@ public class BallSimulator : MonoBehaviour
     // ---------- Respuesta ----------
     void SolveContacts()
     {
+        // Máximo que el jugador puede empujar la pelota POR POSICIÓN en cada iteración.
+        // Así, si el jugador la aprieta contra una pared (el hueco entre él y la pared
+        // es menor que el diámetro de la pelota), nunca la clava tan hondo en la pared
+        // como para sacarla por el otro lado.
+        float maxPushJugador = radius * 0.1f;
+
         for (int it = 0; it < solverIterations; it++)
         {
-            GatherContacts();
-            if (contacts.Count == 0) return;
-            foreach (var c in contacts) Resolve(c);
+            // 1) Jugador (contacto recalculado con la posición actual)
+            GatherContacts(false, true);
+            foreach (var c in contacts) Resolve(c, maxPushJugador);
+
+            // 2) Paredes (contactos recalculados DESPUÉS de empujar el jugador):
+            //    la pared siempre tiene la última palabra.
+            GatherContacts(true, false);
+            foreach (var c in contacts) Resolve(c, float.MaxValue);
         }
     }
 
-    void Resolve(Contact c)
+    void Resolve(Contact c, float maxPush)
     {
-        // Corrección de penetración
-        pos += c.n * Mathf.Max(c.depth - positionSlop, 0f);
+        // Corrección de penetración (limitada por maxPush)
+        pos += c.n * Mathf.Min(Mathf.Max(c.depth - positionSlop, 0f), maxPush);
         grounded = true;
 
         Vector3 rc = -c.n * radius;
