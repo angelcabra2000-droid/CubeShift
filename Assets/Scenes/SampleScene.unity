@@ -888,7 +888,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   mundo: {fileID: 539437559}
   player: {fileID: 2052638936}
-  mass: 1
+  mass: 2
   radioDesdeEscala: 1
   radius: 0.5
   gravity: 20
@@ -1472,6 +1472,7 @@ GameObject:
   - component: {fileID: 2052638941}
   - component: {fileID: 2052638940}
   - component: {fileID: 2052638942}
+  - component: {fileID: 2052638943}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -1630,6 +1631,25 @@ MonoBehaviour:
     m_Bits: 64
   distanciaMaxima: 100
   depurar: 1
+--- !u!114 &2052638943
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2052638935}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e7e9bf40fd43d4746a7c6eba8df7427a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  rotadorMundo: {fileID: 539437560}
+  capaParedes:
+    serializedVersion: 2
+    m_Bits: 64
+  gravedad: 20
+  velocidadMaximaCaida: 30
+  margenSuelo: 0.03
 --- !u!1 &2094574500
 GameObject:
   m_ObjectHideFlags: 0
