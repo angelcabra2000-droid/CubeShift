@@ -2,88 +2,59 @@ using System.Collections;
 using UnityEngine;
 
 /// <summary>
-/// Cámara con 4 posiciones fijas, una de frente a cada lado horizontal del
-/// "Mundo" (adelante/atrás/izquierda/derecha del objetivo), todas mirando
-/// derecho hacia su centro, a la misma altura (sin vistas de arriba/abajo).
-/// Presiona las teclas 1-4 para saltar entre vistas, con una transición
-/// suave.
+/// Cámara con 4 vistas (teclas 1-4), ahora ELEVADA: mira al objetivo desde
+/// arriba en diagonal, en vez de a su misma altura. Así se ve mejor el
+/// laberinto. Mismo nombre de clase para no romper tus referencias.
 ///
-/// (El nombre de la clase quedó como "CamaraVertices" por compatibilidad
-/// con la referencia que ya tenés armada en la escena — aunque ahora ya
-/// no mira desde los vértices del cubo, sino de frente a cada cara.)
-///
-/// Colocar este script sobre tu Main Camera.
-///
-/// La cámara viaja ORBITANDO por fuera de un círculo horizontal alrededor
-/// del objetivo (interpolando la dirección con Slerp, no la posición con
-/// Lerp en línea recta), así que nunca se acerca al cubo durante la
-/// transición, sin importar qué dos vistas elijas.
-///
-/// SEGUIMIENTO CONTINUO: el 'objetivo' (normalmente el Jugador) puede
-/// moverse en cualquier momento, no solo durante una transición de vista.
-/// Por eso, fuera de una transición, la cámara se reubica todos los frames
-/// relativa al objetivo actual.
-///
-/// Numeración de vistas (las 4 direcciones horizontales, en orden):
-///   1: -Z (de frente)   2: +X (derecha)   3: +Z (atrás)   4: -X (izquierda)
+/// Los ejes de movimiento (Adelante / Derecha) siguen siendo HORIZONTALES,
+/// así que MovimientoJugador y SensorPisoRotacion funcionan igual.
 /// </summary>
 public class CamaraVertices : MonoBehaviour
 {
     [Header("Referencias")]
-    [Tooltip("El punto que la cámara siempre mira. Recomendado: el Jugador.")]
     [SerializeField] private Transform objetivo;
 
-    [Header("Geometría de las 4 vistas")]
-    [Tooltip("Distancia horizontal desde el objetivo hasta la cámara.")]
-    [SerializeField] private float distancia = 8f;
+    [Header("Posición de la cámara")]
+    [Tooltip("Distancia horizontal desde el objetivo.")]
+    [SerializeField] private float distancia = 14f;
+
+    [Tooltip("Altura de la cámara sobre el objetivo. Mayor = más vista aérea.")]
+    [SerializeField] private float altura = 12f;
 
     [Header("Transición")]
-    [Tooltip("Duración en segundos del movimiento entre vistas.")]
     [SerializeField] private float duracionTransicion = 0.5f;
-
-    [Tooltip("Curva de aceleración de la transición.")]
     [SerializeField] private AnimationCurve curvaTransicion = AnimationCurve.EaseInOut(0, 0, 1, 1);
 
     [Header("Vista inicial")]
-    [Tooltip("Vista (1-4) donde arranca la cámara.")]
     [SerializeField] private int vistaInicial = 1;
 
-    // Las 4 direcciones horizontales (sin componente Y): frente, derecha,
-    // atrás, izquierda. Todas a la misma altura que el objetivo.
-    // Se crean AL DECLARAR el campo (no en Start) para que existan siempre,
-    // incluso en modo edición o si otro script las consulta antes del Start.
     private readonly Vector3[] direcciones = new Vector3[4]
     {
-        new Vector3(0, 0, -1), // 1: de frente
-        new Vector3(1, 0, 0),  // 2: derecha
-        new Vector3(0, 0, 1),  // 3: atrás
-        new Vector3(-1, 0, 0), // 4: izquierda
+        new Vector3(0, 0, -1),
+        new Vector3(1, 0, 0),
+        new Vector3(0, 0, 1),
+        new Vector3(-1, 0, 0),
     };
 
     private bool moviendo = false;
     private int vistaActual;
 
-    // Índice de vista SIEMPRE válido (0 a 3). En modo edición usa la
-    // "Vista Inicial" del Inspector, porque vistaActual aún no se calculó.
     private int IndiceVista =>
         Mathf.Clamp(Application.isPlaying ? vistaActual : vistaInicial - 1, 0, direcciones.Length - 1);
 
     void Awake()
     {
-        // Se calcula en Awake (antes que cualquier Start/Update de otros scripts).
         vistaActual = Mathf.Clamp(vistaInicial, 1, direcciones.Length) - 1;
     }
 
     void Start()
     {
-        Vector3 posInicial = ObtenerPosicionVista(vistaActual);
-        transform.position = posInicial;
-        transform.rotation = Quaternion.LookRotation((ObjetivoPos() - posInicial).normalized);
+        ColocarEnVista(direcciones[vistaActual]);
     }
 
     void Update()
     {
-        if (moviendo) return; // ignora input mientras la cámara está en transición
+        if (moviendo) return;
 
         if (Input.GetKeyDown(KeyCode.Alpha1)) IrAVista(0);
         if (Input.GetKeyDown(KeyCode.Alpha2)) IrAVista(1);
@@ -93,30 +64,26 @@ public class CamaraVertices : MonoBehaviour
 
     void LateUpdate()
     {
-        // Mientras NO estamos en medio de una transición de vista, seguimos
-        // al objetivo todos los frames (el objetivo puede moverse por sí
-        // solo, ej. el Jugador caminando).
         if (moviendo) return;
-
-        Vector3 objetivoPos = ObjetivoPos();
-        Vector3 posActual = objetivoPos + direcciones[IndiceVista] * distancia;
-        transform.position = posActual;
-        transform.rotation = Quaternion.LookRotation((objetivoPos - posActual).normalized);
+        ColocarEnVista(direcciones[IndiceVista]);
     }
 
-    /// <summary>
-    /// Hacia dónde "mira" la vista actual (horizontal, hacia adentro de la
-    /// pantalla). Se usa como "adelante" del Jugador, que nunca rota. Usa la
-    /// vista de DESTINO, así no cambia a mitad de una transición.
-    /// </summary>
+    /// <summary>"Adelante" HORIZONTAL (hacia adentro de la pantalla). Nunca tiene componente Y.</summary>
     public Vector3 Adelante => -direcciones[IndiceVista];
 
-    /// <summary>Hacia la derecha de la pantalla en la vista actual.</summary>
     public Vector3 Derecha => Vector3.Cross(Vector3.up, Adelante);
 
     private Vector3 ObjetivoPos() => objetivo != null ? objetivo.position : Vector3.zero;
 
-    private Vector3 ObtenerPosicionVista(int indice) => ObjetivoPos() + direcciones[indice] * distancia;
+    private Vector3 PosicionPara(Vector3 dirHorizontal) =>
+        ObjetivoPos() + dirHorizontal * distancia + Vector3.up * altura;
+
+    private void ColocarEnVista(Vector3 dirHorizontal)
+    {
+        Vector3 pos = PosicionPara(dirHorizontal);
+        transform.position = pos;
+        transform.rotation = Quaternion.LookRotation((ObjetivoPos() - pos).normalized);
+    }
 
     private void IrAVista(int indice)
     {
@@ -129,34 +96,28 @@ public class CamaraVertices : MonoBehaviour
     {
         moviendo = true;
 
-        Vector3 dirInicial = (transform.position - ObjetivoPos()).normalized;
+        // Dirección horizontal actual (sin la altura)
+        Vector3 dirInicial = transform.position - ObjetivoPos();
+        dirInicial.y = 0f;
+        dirInicial.Normalize();
+
         Quaternion rotInicial = transform.rotation;
-
         Vector3 dirFinal = direcciones[indice];
-        Quaternion rotFinal = Quaternion.LookRotation(-dirFinal);
+        Quaternion rotFinal = Quaternion.LookRotation(-(dirFinal * distancia + Vector3.up * altura));
 
-        float tiempoTranscurrido = 0f;
-
-        while (tiempoTranscurrido < duracionTransicion)
+        float tiempo = 0f;
+        while (tiempo < duracionTransicion)
         {
-            tiempoTranscurrido += Time.deltaTime;
-            float t = Mathf.Clamp01(tiempoTranscurrido / duracionTransicion);
-            float tCurva = curvaTransicion.Evaluate(t);
+            tiempo += Time.deltaTime;
+            float t = curvaTransicion.Evaluate(Mathf.Clamp01(tiempo / duracionTransicion));
 
-            // Slerp de la DIRECCIÓN (no de la posición): esto hace que la
-            // cámara viaje por un arco alrededor del objetivo, en vez de una
-            // línea recta que podría pasar por dentro del cubo. Seguimos
-            // leyendo ObjetivoPos() cada frame para no perder de vista un
-            // objetivo que también se mueve.
-            Vector3 objetivoPos = ObjetivoPos();
-            Vector3 dirActual = Vector3.Slerp(dirInicial, dirFinal, tCurva);
-            transform.position = objetivoPos + dirActual * distancia;
-            transform.rotation = Quaternion.Slerp(rotInicial, rotFinal, tCurva);
+            Vector3 dirActual = Vector3.Slerp(dirInicial, dirFinal, t);
+            transform.position = PosicionPara(dirActual);
+            transform.rotation = Quaternion.Slerp(rotInicial, rotFinal, t);
             yield return null;
         }
 
-        transform.position = ObjetivoPos() + dirFinal * distancia;
-        transform.rotation = rotFinal;
+        ColocarEnVista(dirFinal);
         moviendo = false;
     }
 }
