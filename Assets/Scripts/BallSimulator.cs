@@ -4,18 +4,20 @@ using UnityEngine;
 /// <summary>
 /// Pelota con física propia (sin Rigidbody) dentro del Mundo que rota.
 ///
-/// NO necesita WorldRotator: lee directamente la pose (posición/rotación)
-/// del Transform "Mundo", que es la que mueve RotadorMundo. Así RotadorMundo,
-/// MovimientoJugador y el resto de scripts quedan exactamente como están.
-///
-/// Se simula en LateUpdate (después de que RotadorMundo y MovimientoJugador
-/// ya movieron al Mundo y al Jugador en este frame) y cada frame se divide en
-/// subpasos. Dentro del frame se interpolan la pose del Mundo y la posición del
-/// Jugador, y de esa interpolación sale la VELOCIDAD de cada pared (para que
-/// la fricción y el rebote contra paredes en movimiento sean correctos).
+/// Se simula en LateUpdate (después de RotadorMundo y MovimientoJugador) y cada
+/// frame se divide en subpasos. Dentro del frame se interpolan la pose del Mundo
+/// y la posición del Jugador; de esa interpolación sale la VELOCIDAD de cada punto
+/// de pared (v = ω × r + v_traslación), que es lo que hace que la caja "empuje"
+/// y "arrastre" a la pelota: rebote y fricción se calculan con la velocidad
+/// RELATIVA pelota-pared.
 ///
 /// Colocar sobre la esfera. La esfera NO debe ser hija del Mundo, NO debe
 /// tener Rigidbody y NO debe estar en el Layer "Paredes".
+///
+/// Materiales: cada pared puede tener su Physic Material (fricción estática,
+/// dinámica y rebote). Si no tiene, se usan los valores "Paredes sin Physic
+/// Material". Mezcla: fricción = media geométrica (pelota, pared);
+/// rebote = producto (pelota * pared).
 /// </summary>
 public class BallSimulator : MonoBehaviour
 {
@@ -26,24 +28,37 @@ public class BallSimulator : MonoBehaviour
     [SerializeField] private CapsuleCollider player;
 
     [Header("Cuerpo")]
-    [SerializeField] private float mass = 1f;
     [Tooltip("Si está activo, el radio se toma de la escala de la esfera (escala/2).")]
     [SerializeField] private bool radioDesdeEscala = true;
     [SerializeField] private float radius = 0.5f;
+    [Tooltip("Densidad en kg/m³. La masa sale de aquí (esfera sólida). Goma ~1100, madera ~700, pelota hueca ~100. " +
+             "La masa solo afecta a la resistencia del aire y a AddImpulse; el rebote/fricción no dependen de ella.")]
+    [SerializeField] private float density = 1100f;
 
     [Header("Ambiente")]
+    [Tooltip("Con la pelota a escala de juego (radio 0.5) un valor de 15-25 'se siente' mejor que 9.81.")]
     [SerializeField] private float gravity = 20f;
     [SerializeField] private bool useDrag = true;
     [SerializeField] private float airDensity = 1.2f;
     [SerializeField] private float dragCoefficient = 0.47f;
+    [Tooltip("Amortiguación del giro por el aire (1/s). Muy pequeña.")]
+    [SerializeField] private float airSpinDamping = 0.02f;
 
-    [Header("Contacto")]
-    [SerializeField, Range(0f, 1f)] private float restitution = 0.5f;
-    [SerializeField] private float restitutionThreshold = 1f;   // bajo esta v_n no hay rebote
+    [Header("Pelota (material)")]
+    [SerializeField, Range(0f, 1f)] private float restitution = 0.7f;
+    [Tooltip("Bajo esta velocidad normal de impacto no hay rebote (evita temblor en reposo).")]
+    [SerializeField] private float restitutionThreshold = 1f;
     [SerializeField] private float muStatic = 0.6f;
     [SerializeField] private float muKinetic = 0.4f;
-    [SerializeField] private float rollingDamping = 0.3f;       // 1/s, resistencia a la rodadura
+    [Tooltip("Coeficiente de resistencia a la rodadura (adimensional). Goma sobre piso duro: 0.01-0.05.")]
+    [SerializeField] private float rollingResistance = 0.02f;
     [SerializeField] private float positionSlop = 0.001f;
+
+    [Header("Paredes sin Physic Material")]
+    [Tooltip("Se multiplica por el rebote de la pelota. 1 = la pared no resta rebote.")]
+    [SerializeField, Range(0f, 1f)] private float wallRestitution = 1f;
+    [SerializeField] private float wallMuStatic = 0.6f;
+    [SerializeField] private float wallMuKinetic = 0.4f;
 
     [Header("Integración")]
     [Tooltip("Tiempo máximo de cada subpaso (s).")]
@@ -54,19 +69,44 @@ public class BallSimulator : MonoBehaviour
     [SerializeField] private int solverIterations = 4;
     [Tooltip("Si un frame dura más que esto, se simula solo este tiempo (evita saltos tras una pausa).")]
     [SerializeField] private float maxDtFrame = 0.05f;
+    [Tooltip("Tope de seguridad de velocidad (u/s). Una pared lejos del jugador puede moverse muy rápido al rotar.")]
+    [SerializeField] private float maxSpeed = 100f;
+
+    [Header("Reposo (sleep)")]
+    [SerializeField] private float sleepSpeed = 0.05f;
+    [SerializeField] private float sleepSpin = 0.1f;
+
+    [Header("Debug")]
+    [SerializeField] private bool mostrarDebug = false;
 
     // Estado
     public Vector3 Velocity;
     public Vector3 AngularVelocity;
     private Vector3 pos;
     private Quaternion orientation = Quaternion.identity;
+    private float mass = 1f;
+
+    public float Mass => mass;
+    /// <summary>Radio real que usa la física (lo lee MetaPelota para detectar el contacto con el jugador).</summary>
+    public float Radius => radius;
+    public float Speed => Velocity.magnitude;
+    private float Inertia => 0.4f * mass * radius * radius;   // esfera sólida
+    public float KineticEnergy => 0.5f * mass * Velocity.sqrMagnitude + 0.5f * Inertia * AngularVelocity.sqrMagnitude;
 
     // Cajas en el marco RÍGIDO del Mundo (posición/rotación del Mundo, sin escala)
-    private struct Box { public Vector3 center; public Quaternion rot; public Vector3 half; }
-    private struct Contact { public Vector3 n, point, surfaceVel; public float depth; public bool wall; }
+    private struct Box
+    {
+        public Vector3 center; public Quaternion rot; public Vector3 half;
+        public float boundR;                    // radio de la esfera que envuelve la caja
+        public float muS, muK, e;               // material de la pared
+    }
+    private struct Contact
+    {
+        public Vector3 n, point, surfaceVel; public float depth;
+        public float muS, muK, e;
+    }
 
     private readonly List<Box> boxes = new();
-    private readonly List<Vector3> corners = new();
     private readonly List<Contact> contacts = new();
 
     // Pose del Mundo en el subpaso actual y en el anterior
@@ -80,6 +120,11 @@ public class BallSimulator : MonoBehaviour
     private Vector3 playerVel;
     private float stepH = 0.005f;
     private bool grounded;
+    private float stepNormalImpulse;   // impulso normal acumulado en el subpaso (para la rodadura)
+
+    // Solo para debug
+    private int ultimosSubpasos;
+    private float ultimaVelMundo;
 
     void Start()
     {
@@ -99,6 +144,8 @@ public class BallSimulator : MonoBehaviour
             radius = 0.5f * Mathf.Max(s.x, Mathf.Max(s.y, s.z));
         }
 
+        mass = Mathf.Max(1e-4f, density * (4f / 3f) * Mathf.PI * radius * radius * radius);
+
         Vector3 wp = mundo.position;
         Quaternion wr = mundo.rotation;
         Quaternion wrInv = Quaternion.Inverse(wr);
@@ -106,31 +153,36 @@ public class BallSimulator : MonoBehaviour
         int nCajas = 0, nAprox = 0;
         foreach (var col in mundo.GetComponentsInChildren<Collider>())
         {
-            // Los colliders con Is Trigger TAMBIÉN cuentan como pared: en este proyecto
-            // el sensor y el jugador ya detectan las paredes con raycasts, así que es
-            // normal que sean triggers.
+            // Los colliders con Is Trigger TAMBIÉN cuentan como pared (en este proyecto
+            // el sensor y el jugador detectan las paredes con raycasts, así que es normal
+            // que sean triggers). Ojo: cualquier trigger hijo del Mundo (meta, zonas...)
+            // también se vuelve sólido para la pelota.
             if (col == player) continue;
             if (col.transform.IsChildOf(transform)) continue;     // colliders de la propia pelota
+
+            LeerMaterial(col, out float mS, out float mK, out float e);
 
             if (col is BoxCollider bc)
             {
                 Vector3 cW = bc.transform.TransformPoint(bc.center);
                 Vector3 half = Vector3.Scale(bc.size, bc.transform.lossyScale) * 0.5f;
                 half = new Vector3(Mathf.Abs(half.x), Mathf.Abs(half.y), Mathf.Abs(half.z));
-                AddBox(wrInv * (cW - wp), wrInv * bc.transform.rotation, half);
+                AddBox(wrInv * (cW - wp), wrInv * bc.transform.rotation, half, mS, mK, e);
                 nCajas++;
             }
             else
             {
                 // Otro tipo de collider (Plane, Quad, Mesh...): se aproxima con su caja envolvente.
                 Bounds b = col.bounds;
-                AddBox(wrInv * (b.center - wp), wrInv, b.extents);
+                AddBox(wrInv * (b.center - wp), wrInv, b.extents, mS, mK, e);
                 nAprox++;
                 Debug.LogWarning($"[BallSimulator] '{col.name}' no es BoxCollider ({col.GetType().Name}); se aproxima con su caja envolvente. Mejor usa un Cube con BoxCollider.", col);
             }
         }
 
-        Debug.Log($"[BallSimulator] Paredes cargadas: {nCajas} BoxCollider + {nAprox} aproximadas. Radio = {radius:F3}");
+        float area = Mathf.PI * radius * radius;
+        float vTerminal = useDrag ? Mathf.Sqrt(2f * mass * gravity / (airDensity * dragCoefficient * area)) : float.PositiveInfinity;
+        Debug.Log($"[BallSimulator] Paredes: {nCajas} BoxCollider + {nAprox} aproximadas. Radio={radius:F3}, masa={mass:F2} kg, velocidad terminal={vTerminal:F1} u/s");
         if (nCajas + nAprox == 0)
             Debug.LogError("[BallSimulator] No encontré NINGÚN collider hijo de 'Mundo'. La pelota atravesará todo.", this);
 
@@ -139,14 +191,19 @@ public class BallSimulator : MonoBehaviour
         prevFramePPos = player != null ? player.transform.position : Vector3.zero;
     }
 
-    void AddBox(Vector3 center, Quaternion rot, Vector3 half)
+    void LeerMaterial(Collider col, out float mS, out float mK, out float e)
     {
-        boxes.Add(new Box { center = center, rot = rot, half = half });
-        for (int sx = -1; sx <= 1; sx += 2)
-            for (int sy = -1; sy <= 1; sy += 2)
-                for (int sz = -1; sz <= 1; sz += 2)
-                    corners.Add(center + rot * Vector3.Scale(half, new Vector3(sx, sy, sz)));
+        var m = col.sharedMaterial;   // PhysicMaterial (Unity <=2022) o PhysicsMaterial (Unity 6)
+        if (m != null) { mS = m.staticFriction; mK = m.dynamicFriction; e = m.bounciness; }
+        else { mS = wallMuStatic; mK = wallMuKinetic; e = wallRestitution; }
     }
+
+    void AddBox(Vector3 center, Quaternion rot, Vector3 half, float mS, float mK, float e)
+    {
+        boxes.Add(new Box { center = center, rot = rot, half = half, boundR = half.magnitude, muS = mS, muK = mK, e = e });
+    }
+
+    static float MixFriccion(float a, float b) => Mathf.Sqrt(Mathf.Max(0f, a) * Mathf.Max(0f, b));
 
     // LateUpdate: ya se movieron el Mundo (RotadorMundo) y el Jugador (MovimientoJugador) en este frame.
     void LateUpdate()
@@ -158,16 +215,19 @@ public class BallSimulator : MonoBehaviour
         Quaternion wRot1 = mundo.rotation;
         Vector3 pPos1 = player != null ? player.transform.position : Vector3.zero;
 
-        // Cuánto se movió la pared que más se movió + la pelota + el jugador -> cuántos subpasos hacen falta
-        float movMundo = MaxCornerDisplacement(prevFrameWPos, prevFrameWRot, wPos1, wRot1);
+        // Cuánto se movieron las paredes CERCANAS a la pelota + la pelota + el jugador -> cuántos subpasos hacen falta
+        float alcance = Velocity.magnitude * dt;
+        float movMundo = MaxDesplazamientoCercano(prevFrameWPos, prevFrameWRot, wPos1, wRot1, alcance);
         Vector3 dPlayer = pPos1 - prevFramePPos;
         playerVel = dPlayer / dt;
 
-        float movTotal = Velocity.magnitude * dt + movMundo + dPlayer.magnitude;
+        float movTotal = alcance + movMundo + dPlayer.magnitude;
         int n = Mathf.CeilToInt(Mathf.Max(dt / maxPasoTiempo, movTotal / (radius * maxMovPorPasoRadios)));
         n = Mathf.Clamp(n, 1, maxSubpasos);
         float h = dt / n;
         stepH = h;
+        ultimosSubpasos = n;
+        ultimaVelMundo = movMundo / dt;
 
         wPos = prevFrameWPos;
         wRot = prevFrameWRot;
@@ -182,11 +242,21 @@ public class BallSimulator : MonoBehaviour
             playerOffset = Vector3.Lerp(prevFramePPos, pPos1, s) - pPos1;
 
             grounded = false;
+            stepNormalImpulse = 0f;
             Integrate(h);            // gravedad + aire
             SolveContacts();         // normal + fricción (paredes y jugador)
-            if (grounded)            // resistencia a la rodadura
-                AngularVelocity *= Mathf.Max(0f, 1f - rollingDamping * h);
+            AplicarRodadura();       // resistencia a la rodadura (proporcional a la fuerza normal)
             IntegrateOrientation(h);
+        }
+
+        // Reposo: si todo está quieto, se apaga el micro-movimiento residual.
+        bool mundoQuieto = (wPos1 - prevFrameWPos).sqrMagnitude < 1e-10f && Quaternion.Angle(prevFrameWRot, wRot1) < 0.001f;
+        if (grounded && mundoQuieto && dPlayer.sqrMagnitude < 1e-8f
+            && Velocity.sqrMagnitude < sleepSpeed * sleepSpeed
+            && AngularVelocity.sqrMagnitude < sleepSpin * sleepSpin)
+        {
+            Velocity = Vector3.zero;
+            AngularVelocity = Vector3.zero;
         }
 
         transform.SetPositionAndRotation(pos, orientation);
@@ -196,12 +266,21 @@ public class BallSimulator : MonoBehaviour
         prevFramePPos = pPos1;
     }
 
-    float MaxCornerDisplacement(Vector3 p0, Quaternion r0, Vector3 p1, Quaternion r1)
+    // Cota superior del desplazamiento de las cajas que podrían tocar a la pelota en este frame.
+    // Desplazamiento de cualquier punto de la caja <= desplazamiento de su centro + boundR * cuerda(θ).
+    float MaxDesplazamientoCercano(Vector3 p0, Quaternion r0, Vector3 p1, Quaternion r1, float alcanceBola)
     {
+        float theta = Quaternion.Angle(r0, r1) * Mathf.Deg2Rad;
+        float chord = 2f * Mathf.Sin(theta * 0.5f);
         float m = 0f;
-        foreach (var L in corners)
+        foreach (var b in boxes)
         {
-            float d = ((p1 + r1 * L) - (p0 + r0 * L)).magnitude;
+            Vector3 c0 = p0 + r0 * b.center;
+            Vector3 c1 = p1 + r1 * b.center;
+            float d = (c1 - c0).magnitude + b.boundR * chord;
+            float reach = b.boundR + radius + d + alcanceBola;
+            float reach2 = reach * reach;
+            if ((pos - c0).sqrMagnitude > reach2 && (pos - c1).sqrMagnitude > reach2) continue;
             if (d > m) m = d;
         }
         return m;
@@ -225,14 +304,31 @@ public class BallSimulator : MonoBehaviour
             a -= (k / mass) * Velocity.magnitude * Velocity;
         }
         Velocity += a * h;
+
+        if (Velocity.sqrMagnitude > maxSpeed * maxSpeed)
+            Velocity = Velocity.normalized * maxSpeed;
+
         pos += Velocity * h;
     }
 
     void IntegrateOrientation(float h)
     {
+        if (useDrag) AngularVelocity *= Mathf.Max(0f, 1f - airSpinDamping * h);
+
         float w = AngularVelocity.magnitude;
         if (w > 1e-5f)
             orientation = Quaternion.AngleAxis(w * Mathf.Rad2Deg * h, AngularVelocity / w) * orientation;
+    }
+
+    // Resistencia a la rodadura: par opuesto al giro, de magnitud Crr * N * r.
+    // Con N = impulso normal del subpaso, así es 0 en el aire y crece con la fuerza de contacto.
+    void AplicarRodadura()
+    {
+        if (stepNormalImpulse <= 0f || rollingResistance <= 0f) return;
+        float w = AngularVelocity.magnitude;
+        if (w < 1e-5f) return;
+        float dw = rollingResistance * stepNormalImpulse * radius / Inertia;
+        AngularVelocity *= Mathf.Max(0f, 1f - dw / w);
     }
 
     // ---------- Detección ----------
@@ -244,8 +340,13 @@ public class BallSimulator : MonoBehaviour
         if (conParedes)
             foreach (var b in boxes)
             {
-                Quaternion rW = wRot * b.rot;
                 Vector3 cW = wPos + wRot * b.center;
+
+                // Descarte rápido: la esfera no llega a la esfera envolvente de la caja
+                float reach = b.boundR + radius;
+                if ((pos - cW).sqrMagnitude > reach * reach) continue;
+
+                Quaternion rW = wRot * b.rot;
                 Vector3 c = Quaternion.Inverse(rW) * (pos - cW);
 
                 Vector3 q = new Vector3(
@@ -284,7 +385,9 @@ public class BallSimulator : MonoBehaviour
                     point = p,
                     depth = depth,
                     surfaceVel = SurfaceVelocityAt(p),
-                    wall = true
+                    muS = b.muS,
+                    muK = b.muK,
+                    e = b.e
                 });
             }
 
@@ -319,7 +422,10 @@ public class BallSimulator : MonoBehaviour
                     n = n,
                     point = pos - n * radius,
                     depth = sum - dist,
-                    surfaceVel = playerVel
+                    surfaceVel = playerVel,
+                    muS = wallMuStatic,
+                    muK = wallMuKinetic,
+                    e = wallRestitution
                 });
             }
         }
@@ -329,9 +435,8 @@ public class BallSimulator : MonoBehaviour
     void SolveContacts()
     {
         // Máximo que el jugador puede empujar la pelota POR POSICIÓN en cada iteración.
-        // Así, si el jugador la aprieta contra una pared (el hueco entre él y la pared
-        // es menor que el diámetro de la pelota), nunca la clava tan hondo en la pared
-        // como para sacarla por el otro lado.
+        // Así, si el jugador la aprieta contra una pared, nunca la clava tan hondo
+        // en la pared como para sacarla por el otro lado.
         float maxPushJugador = radius * 0.1f;
 
         for (int it = 0; it < solverIterations; it++)
@@ -358,27 +463,40 @@ public class BallSimulator : MonoBehaviour
         float vn = Vector3.Dot(vRel, c.n);
         if (vn >= 0f) return;                       // ya se separan
 
-        float I = 0.4f * mass * radius * radius;    // esfera sólida
-        float e = (-vn > restitutionThreshold) ? restitution : 0f;
+        // Rebote: producto de los coeficientes (pelota * pared), solo sobre el umbral
+        float e = (-vn > restitutionThreshold) ? restitution * c.e : 0f;
         float jn = -(1f + e) * vn * mass;           // impulso normal
+        stepNormalImpulse += jn;
 
         Vector3 J = jn * c.n;
+
+        // Fricción de Coulomb con la velocidad tangencial RELATIVA (incluye el giro de la caja)
+        float muS = MixFriccion(muStatic, c.muS);
+        float muK = Mathf.Min(MixFriccion(muKinetic, c.muK), muS);
 
         Vector3 vt = vRel - vn * c.n;
         float vtMag = vt.magnitude;
         if (vtMag > 1e-5f)
         {
             Vector3 t = vt / vtMag;
-            float jStick = vtMag * mass * 2f / 7f;  // anula el deslizamiento
-            float jt = (jStick <= muStatic * jn) ? jStick : muKinetic * jn;
+            float jStick = vtMag * mass * 2f / 7f;  // anula el deslizamiento (esfera sólida)
+            float jt = (jStick <= muS * jn) ? jStick : muK * jn;
             J -= jt * t;
         }
 
         Velocity += J / mass;
-        AngularVelocity += Vector3.Cross(rc, J) / I;
+        AngularVelocity += Vector3.Cross(rc, J) / Inertia;
     }
 
     // API para impulsos externos (power-ups, empujones, etc.)
     public void AddImpulse(Vector3 impulse) => Velocity += impulse / mass;
     public void AddForce(Vector3 force, float dt) => Velocity += force / mass * dt;
+
+    void OnGUI()
+    {
+        if (!mostrarDebug) return;
+        GUI.Label(new Rect(10, 10, 700, 24),
+            $"v={Velocity.magnitude:F2} u/s   ω={AngularVelocity.magnitude:F2} rad/s   E={KineticEnergy:F1} J   " +
+            $"subpasos={ultimosSubpasos}   v.pared.max={ultimaVelMundo:F1} u/s");
+    }
 }

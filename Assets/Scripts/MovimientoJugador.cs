@@ -34,6 +34,7 @@ public class MovimientoJugador : MonoBehaviour
     [Header("Referencias")]
     [SerializeField] private RotadorMundo rotadorMundo;
     private SensorPisoRotacion sensor;
+    private AnimacionJugador anim;
 
     [Header("Movimiento")]
     [Tooltip("Velocidad de avance/retroceso en unidades por segundo.")]
@@ -60,6 +61,7 @@ public class MovimientoJugador : MonoBehaviour
     private void Awake()
     {
         sensor = GetComponent<SensorPisoRotacion>();
+        anim = GetComponent<AnimacionJugador>();
     }
 
     private void Update()
@@ -67,18 +69,14 @@ public class MovimientoJugador : MonoBehaviour
         if (rotadorMundo != null && rotadorMundo.EstaRotando)
         {
             QuitarTodosLosResaltados();
+            ActualizarAnimacion(0f, false);
             return;
         }
 
-        // "Mirar" a un lado = girar el MUNDO en sentido contrario, alrededor
-        // del eje vertical que pasa por el Jugador. En Unity un ángulo
-        // positivo sobre Vector3.up gira en sentido horario visto desde
-        // arriba, así que: A (mirar izquierda) -> Mundo +90°, D (mirar
-        // derecha) -> Mundo -90°. Si lo sentís al revés, invertí los signos.
         if (rotadorMundo != null)
         {
-            if (Input.GetKeyDown(KeyCode.A)) { rotadorMundo.Rotar(Vector3.up, 90f); return; }
-            if (Input.GetKeyDown(KeyCode.D)) { rotadorMundo.Rotar(Vector3.up, -90f); return; }
+            if (Input.GetKeyDown(KeyCode.A)) { ActualizarAnimacion(0f, false); rotadorMundo.Rotar(Vector3.up, 90f); return; }
+            if (Input.GetKeyDown(KeyCode.D)) { ActualizarAnimacion(0f, false); rotadorMundo.Rotar(Vector3.up, -90f); return; }
         }
 
         bool bloqueado = MoverJugador();
@@ -94,20 +92,30 @@ public class MovimientoJugador : MonoBehaviour
         if (Input.GetKey(KeyCode.W)) entrada = 1f;
         else if (Input.GetKey(KeyCode.S)) entrada = -1f;
 
-        // "Adelante" = hacia adentro de la pantalla según la vista de cámara
-        // actual (el Jugador nunca rota, así que su propio forward no sirve).
         Vector3 adelante = sensor.Adelante;
 
         if (Mathf.Approximately(entrada, 0f))
+        {
+            ActualizarAnimacion(0f, false);
             return HayParedEnDireccion(adelante) || HayParedEnDireccion(-adelante);
+        }
 
         Vector3 direccion = adelante * entrada;
 
         if (HayParedEnDireccion(direccion))
+        {
+            ActualizarAnimacion(0f, false);   // empujando una pared: no camina en el lugar
             return true;
+        }
 
         transform.position += direccion * velocidad * Time.deltaTime;
+        ActualizarAnimacion(1f, entrada < 0f);
         return false;
+    }
+
+    private void ActualizarAnimacion(float velocidadAnim, bool retroceso)
+    {
+        if (anim != null) anim.SetMovimiento(velocidadAnim, retroceso);
     }
 
     private bool HayParedEnDireccion(Vector3 direccion)
