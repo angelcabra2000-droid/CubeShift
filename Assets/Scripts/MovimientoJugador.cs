@@ -17,16 +17,15 @@ using UnityEngine;
 /// cuáles de las 4 direcciones (adelante/atrás/izquierda/derecha) tienen
 /// una pared que podría convertirse en el nuevo piso, y RESALTA esa(s)
 /// pared(es) con un material distinto mientras la rotación sea válida.
-/// No hay "fantasma" del jugador: como el jugador no cambia de lugar, lo
-/// único que tiene sentido mostrar es cuál pared real se va a convertir
-/// en piso.
+///
+/// DETECCIÓN DE CHOQUE: la esfera de choque se mantiene siempre por encima
+/// de la superficie del suelo (medida con un rayo hacia abajo). Así no roza
+/// las costuras entre piezas de suelo, que antes se confundían con paredes.
 ///
 /// --- CONFIGURACIÓN NECESARIA ---
 /// 1. Colocar este script y SensorPisoRotacion sobre el Jugador.
 /// 2. Asignar 'rotadorMundo' y 'capaParedes' (Layer "Paredes").
-/// 3. Crear un material brillante/de otro color (puede ser el mismo
-///    "Mat_Fantasma" que ya tenés, o uno nuevo tipo "Mat_Resaltado") y
-///    asignarlo en 'materialResaltado'.
+/// 3. Asignar un material brillante/de otro color en 'materialResaltado'.
 /// </summary>
 [RequireComponent(typeof(SensorPisoRotacion))]
 public class MovimientoJugador : MonoBehaviour
@@ -46,8 +45,19 @@ public class MovimientoJugador : MonoBehaviour
     [Tooltip("Radio del SphereCast usado para detectar paredes por delante/detrás.")]
     [SerializeField] private float radioChoque = 0.3f;
 
+    [Tooltip("Separación mínima entre el fondo de la esfera de choque y la superficie del suelo. Evita que roce las costuras entre piezas de suelo. Si todavía te frena en las uniones, súbelo a 0.1 o 0.15.")]
+    [SerializeField] private float margenSobreSuelo = 0.05f;
+
     [Tooltip("Layer de las paredes/geometría del laberinto.")]
     [SerializeField] private LayerMask capaParedes;
+
+    [Header("Giro con A/D")]
+    [Tooltip("Marcado: cuando el personaje mira hacia atrás (después de S), A y D rotan el Mundo en sentido contrario al de cuando mira al frente, para que 'izquierda/derecha' sigan siendo las del personaje. Desmárcalo si lo ves al revés.")]
+    [SerializeField] private bool invertirGiroMirandoAtras = true;
+
+    [Header("Depuración")]
+    [Tooltip("Escribe en la Console qué objeto te bloquea al caminar (solo cuando cambia).")]
+    [SerializeField] private bool registrarBloqueos = true;
 
     [Header("Resaltado de paredes candidatas")]
     [Tooltip("Material que se asigna temporalmente a una pared mientras rotar hacia ella sea válido.")]
@@ -57,6 +67,8 @@ public class MovimientoJugador : MonoBehaviour
     private readonly Dictionary<Renderer, Material> materialesOriginales = new Dictionary<Renderer, Material>();
     private readonly HashSet<Renderer> resaltadasEsteFrame = new HashSet<Renderer>();
     private readonly List<Renderer> bufferRestaurar = new List<Renderer>();
+
+    private string ultimoBloqueo = "";
 
     private void Awake()
     {
@@ -75,8 +87,12 @@ public class MovimientoJugador : MonoBehaviour
 
         if (rotadorMundo != null)
         {
-            if (Input.GetKeyDown(KeyCode.A)) { ActualizarAnimacion(0f, false); rotadorMundo.Rotar(Vector3.up, 90f); return; }
-            if (Input.GetKeyDown(KeyCode.D)) { ActualizarAnimacion(0f, false); rotadorMundo.Rotar(Vector3.up, -90f); return; }
+            // A = el personaje mira a SU izquierda, D = a SU derecha. Si está de espaldas a la
+            // cámara, su izquierda es la derecha de la pantalla, así que el Mundo gira al revés.
+            float signo = (invertirGiroMirandoAtras && anim != null && anim.MiraAtras) ? -1f : 1f;
+
+            if (Input.GetKeyDown(KeyCode.A)) { ActualizarAnimacion(0f, false); rotadorMundo.Rotar(Vector3.up, 90f * signo); return; }
+            if (Input.GetKeyDown(KeyCode.D)) { ActualizarAnimacion(0f, false); rotadorMundo.Rotar(Vector3.up, -90f * signo); return; }
         }
 
         bool bloqueado = MoverJugador();
@@ -102,14 +118,19 @@ public class MovimientoJugador : MonoBehaviour
 
         Vector3 direccion = adelante * entrada;
 
-        if (HayParedEnDireccion(direccion))
+        if (HayParedEnDireccion(direccion, true))
         {
             ActualizarAnimacion(0f, false);   // empujando una pared: no camina en el lugar
             return true;
         }
 
-        transform.position += direccion * velocidad * Time.deltaTime;
+        // Avisa a la animación; si cambia de sentido, inicia el giro de 180°
         ActualizarAnimacion(1f, entrada < 0f);
+
+        // Si hay que girar primero, espera a que termine antes de caminar
+        if (anim != null && anim.DebeEsperarGiro) return false;
+
+        transform.position += direccion * velocidad * Time.deltaTime;
         return false;
     }
 
@@ -118,10 +139,50 @@ public class MovimientoJugador : MonoBehaviour
         if (anim != null) anim.SetMovimiento(velocidadAnim, retroceso);
     }
 
-    private bool HayParedEnDireccion(Vector3 direccion)
+    /// <summary>
+    /// ¿Hay una pared en 'direccion'? La esfera de choque se eleva si hace falta
+    /// para que su fondo quede siempre por encima del suelo real (medido con un
+    /// rayo hacia abajo), así las costuras entre piezas de suelo no cuentan como pared.
+    /// Los huecos no afectan: si debajo no hay piso cercano, la esfera no se mueve.
+    /// </summary>
+    private bool HayParedEnDireccion(Vector3 direccion, bool registrar = false)
     {
-        return Physics.SphereCast(transform.position, radioChoque, direccion.normalized,
-            out _, distanciaChoque, capaParedes);
+        Vector3 origen = transform.position;
+        float sueloY = float.NaN;
+        float centroSobreSuelo = float.NaN;
+
+        if (Physics.Raycast(origen, Vector3.down, out RaycastHit suelo, 50f,
+                capaParedes, QueryTriggerInteraction.Ignore))
+        {
+            sueloY = suelo.point.y;
+            centroSobreSuelo = origen.y - sueloY;
+
+            float minimo = sueloY + radioChoque + margenSobreSuelo;
+            if (origen.y < minimo) origen.y = minimo;
+        }
+
+        bool hay = Physics.SphereCast(origen, radioChoque, direccion.normalized,
+            out RaycastHit hit, distanciaChoque, capaParedes, QueryTriggerInteraction.Ignore);
+
+        if (hay && registrar && registrarBloqueos)
+        {
+            Renderer rend = hit.collider.GetComponentInParent<Renderer>();
+            string estado = rend == null ? "sin renderer" : (rend.enabled ? "visible" : "OCULTA");
+
+            string msg = "Bloquea: " + hit.collider.name
+                + " | normal " + hit.normal.ToString("F2")
+                + " | contacto sobre el suelo " + (hit.point.y - sueloY).ToString("F2")
+                + " | centro sobre el suelo " + centroSobreSuelo.ToString("F2")
+                + " | " + estado;
+
+            if (msg != ultimoBloqueo)
+            {
+                Debug.Log("[MovimientoJugador] " + msg, hit.collider);
+                ultimoBloqueo = msg;
+            }
+        }
+
+        return hay;
     }
 
     private void ActualizarResaltados()

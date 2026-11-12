@@ -31,6 +31,12 @@ public class MetaPelota : MonoBehaviour
     [Header("Mensaje")]
     [SerializeField] private string mensaje = "¡Encontraste la pelota!";
 
+    [Header("Final")]
+    [Tooltip("Segundos que se ve la animación de victoria antes de mostrar el mensaje.")]
+    [SerializeField] private float retrasoMensaje = 3f;
+
+    private float tiempoFin;
+
     public bool Terminado { get; private set; }
     public event System.Action OnPelotaEncontrada;
 
@@ -100,6 +106,7 @@ public class MetaPelota : MonoBehaviour
     private void Terminar()
     {
         Terminado = true;
+        tiempoFin = Time.unscaledTime;
         Time.timeScale = 0f;   // congela movimiento, física de la bola y rotaciones
         OnPelotaEncontrada?.Invoke();
         Debug.Log("[MetaPelota] Pelota encontrada: fin del juego.");
@@ -125,6 +132,8 @@ public class MetaPelota : MonoBehaviour
     private void OnGUI()
     {
         if (!Terminado) return;
+
+        if (Time.unscaledTime - tiempoFin < retrasoMensaje) return;
 
         var estilo = new GUIStyle(GUI.skin.label)
         {
