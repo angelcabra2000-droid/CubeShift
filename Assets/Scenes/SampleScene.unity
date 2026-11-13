@@ -8552,6 +8552,7 @@ MonoBehaviour:
   capaParedes:
     serializedVersion: 2
     m_Bits: 64
+  invertirGiroMirandoAtras: 1
   registrarBloqueos: 1
   materialResaltado: {fileID: 2100000, guid: 9a5c98cba31baeb4f806d6cba77514cc, type: 2}
 --- !u!114 &2052638941
@@ -8634,6 +8635,7 @@ MonoBehaviour:
   distanciaSuelo: 0.15
   retrasoCaida: 0.1
   teclaBaile: 116
+  memoriaBaile: 1.5
   modeloMiraHaciaAdelante: 1
   duracionGiro: 0.9
   esperarGiroParaMover: 1
