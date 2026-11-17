@@ -144,16 +144,20 @@ public class AnimacionJugador : MonoBehaviour
     {
         if (animator == null || juegoTerminado) return;
 
-        // Suelo (mientras el Mundo gira se mantiene el estado anterior)
-        bool rotando = rotadorMundo != null && rotadorMundo.EstaRotando;
-        if (!rotando)
+        // Suelo: aunque el mundo esté rotando, seguimos revisando si hay suelo
+        // debajo para que el Animator no se quede congelado en el aire.
+        if (DetectarSuelo())
         {
-            if (DetectarSuelo()) tiempoSinSuelo = 0f;
-            else tiempoSinSuelo += Time.deltaTime;
+            tiempoSinSuelo = 0f;
+        }
+        else
+        {
+            tiempoSinSuelo += Time.deltaTime;
         }
 
         bool enSuelo = tiempoSinSuelo < retrasoCaida;
         animator.SetBool(EnSueloHash, enSuelo);
+        // ... resto del código ...
 
         // Baile: la tecla se "recuerda" unos instantes, así no se pierde si se pulsa mientras
         // el personaje aún termina el giro o la transición a Idle (justo después de S).

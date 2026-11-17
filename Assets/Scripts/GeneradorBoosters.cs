@@ -66,6 +66,10 @@ public class GeneradorBoosters : MonoBehaviour
 
     void Update()
     {
+        if (ControlPartida.Instancia == null ||
+            !ControlPartida.Instancia.EstaJugando)
+            return;
+
         boosters.RemoveAll(b => b == null);
 
         temporizador += Time.deltaTime;
@@ -78,6 +82,7 @@ public class GeneradorBoosters : MonoBehaviour
                 GenerarBooster();
         }
     }
+
 
     void GenerarBooster()
     {

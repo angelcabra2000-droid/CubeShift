@@ -45,7 +45,7 @@ public class GravedadJugador : MonoBehaviour
 
     private void Update()
     {
-        if (rotadorMundo != null && rotadorMundo.EstaRotando)
+        if (rotadorMundo != null && rotadorMundo.PausaGravedad)
         {
             velocidadCaida = 0f;
             return;

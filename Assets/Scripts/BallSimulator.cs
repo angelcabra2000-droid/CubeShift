@@ -27,6 +27,9 @@ public class BallSimulator : MonoBehaviour
     [Tooltip("CapsuleCollider del Jugador (se usa como cuerpo con el que choca la pelota).")]
     [SerializeField] private CapsuleCollider player;
 
+    [Header("Sonido")]
+    [SerializeField] private SonidoPelota sonidoPelota;
+
     [Header("Cuerpo")]
     [Tooltip("Si está activo, el radio se toma de la escala de la esfera (escala/2).")]
     [SerializeField] private bool radioDesdeEscala = true;
@@ -461,7 +464,13 @@ public class BallSimulator : MonoBehaviour
         Vector3 rc = -c.n * radius;
         Vector3 vRel = Velocity + Vector3.Cross(AngularVelocity, rc) - c.surfaceVel;
         float vn = Vector3.Dot(vRel, c.n);
-        if (vn >= 0f) return;                       // ya se separan
+        if (vn >= 0f) return;
+
+        if (sonidoPelota != null)
+        {
+            Debug.Log("CHOQUE DETECTADO: " + (-vn));
+            sonidoPelota.ReproducirRebote(-vn);
+        }
 
         // Rebote: producto de los coeficientes (pelota * pared), solo sobre el umbral
         float e = (-vn > restitutionThreshold) ? restitution * c.e : 0f;

@@ -42,6 +42,9 @@ public class ClicParaRotar : MonoBehaviour
 
     private void Update()
     {
+        if (ControlPartida.Instancia == null ||
+    !ControlPartida.Instancia.EstaJugando)
+            return;
         if (!Input.GetMouseButtonDown(0)) return;
         if (camara == null || rotadorMundo == null || sensor == null) return;
         if (rotadorMundo.EstaRotando) return;
@@ -69,7 +72,10 @@ public class ClicParaRotar : MonoBehaviour
                 // quede justo bajo los pies (si falla, 0 = sin ajuste).
                 sensor.ObtenerCorreccionVertical(direccion, out float correccion);
 
-                if (depurar) Debug.Log($"[ClicParaRotar] Pared válida: {impacto.collider.name}. Rotando eje={eje}, grados={grados}, correccionVertical={correccion:F3}.");
+                if (depurar)
+                    Debug.Log($"[ClicParaRotar] Pared válida: {impacto.collider.name}. Rotando eje={eje}, grados={grados}, correccionVertical={correccion:F3}.");
+
+                rotadorMundo.ReproducirSonidoRotacion();
                 rotadorMundo.Rotar(eje, grados, correccion);
                 return;
             }

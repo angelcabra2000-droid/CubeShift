@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using System.Collections;
 
 /// <summary>
 /// Fin del juego: cuando el Jugador encuentra (toca) la pelota, el juego se
@@ -34,6 +35,12 @@ public class MetaPelota : MonoBehaviour
     [Header("Final")]
     [Tooltip("Segundos que se ve la animación de victoria antes de mostrar el mensaje.")]
     [SerializeField] private float retrasoMensaje = 3f;
+
+    [Header("Menu de victoria")]
+    [SerializeField] private MenuVictoria menuVictoria;
+
+    [Header("Sonido de pelota")]
+    [SerializeField] private SonidoPelota sonidoPelota;
 
     private float tiempoFin;
 
@@ -105,11 +112,45 @@ public class MetaPelota : MonoBehaviour
 
     private void Terminar()
     {
+        if (Terminado)
+            return;
+
+        if (ControlPartida.Instancia == null ||
+            !ControlPartida.Instancia.EstaJugando)
+            return;
+
         Terminado = true;
-        tiempoFin = Time.unscaledTime;
-        Time.timeScale = 0f;   // congela movimiento, física de la bola y rotaciones
+        if (sonidoPelota != null)
+            sonidoPelota.DetenerSonidos();
+
+        float tiempoFinal =
+            ControlPartida.Instancia.tiempoPartida;
+
+        ControlPartida.Instancia.IniciarAnimacionVictoria();
+
+        // Detener musica del nivel
+        if (menuVictoria != null)
+        {
+            menuVictoria.DetenerMusicaNivel();
+            menuVictoria.ReproducirSonidoVictoria(tiempoFinal);
+        }
+
         OnPelotaEncontrada?.Invoke();
-        Debug.Log("[MetaPelota] Pelota encontrada: fin del juego.");
+
+        StartCoroutine(MostrarVictoriaDespues(tiempoFinal));
+    }
+
+    private IEnumerator MostrarVictoriaDespues(float tiempoFinal)
+    {
+        yield return new WaitForSecondsRealtime(retrasoMensaje);
+
+        if (ControlPartida.Instancia != null)
+            ControlPartida.Instancia.Ganar();
+
+        if (menuVictoria != null)
+            menuVictoria.MostrarVictoria(tiempoFinal);
+
+        Debug.Log("Victoria. Tiempo: " + tiempoFinal);
     }
 
     private void Reiniciar()
@@ -129,25 +170,4 @@ public class MetaPelota : MonoBehaviour
         Time.timeScale = 1f;
     }
 
-    private void OnGUI()
-    {
-        if (!Terminado) return;
-
-        if (Time.unscaledTime - tiempoFin < retrasoMensaje) return;
-
-        var estilo = new GUIStyle(GUI.skin.label)
-        {
-            alignment = TextAnchor.MiddleCenter,
-            fontSize = 36,
-            fontStyle = FontStyle.Bold
-        };
-        estilo.normal.textColor = Color.white;
-
-        GUI.Box(new Rect(0, 0, Screen.width, Screen.height), GUIContent.none);
-        GUI.Label(new Rect(0, Screen.height * 0.35f, Screen.width, 60), mensaje, estilo);
-
-        estilo.fontSize = 20;
-        estilo.fontStyle = FontStyle.Normal;
-        GUI.Label(new Rect(0, Screen.height * 0.35f + 70, Screen.width, 40), "Presiona R para reiniciar", estilo);
-    }
 }

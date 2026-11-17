@@ -82,10 +82,17 @@ public class InterfazEnergia : MonoBehaviour
             alertaEnergia.SetActive(false);
             panelFinJuego.SetActive(true);
 
-            Time.timeScale = 0f;
+            if (ControlPartida.Instancia != null)
+            {
+                ControlPartida.Instancia.Perder();
+            }
+            else
+            {
+                Debug.LogError("No se encontro ControlPartida");
+                Time.timeScale = 0f;
+            }
         }
     }
-
     void ActualizarBarra()
     {
         if (energiaJugador == null)

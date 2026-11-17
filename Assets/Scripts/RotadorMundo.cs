@@ -34,8 +34,16 @@ public class RotadorMundo : MonoBehaviour
     [Tooltip("El SensorPisoRotacion del Jugador. Sin esto no hay forma de saber el eje/grados correctos para una dirección.")]
     [SerializeField] private SensorPisoRotacion sensor;
 
+    [Header("Sonido de rotacion")]
+    [SerializeField] private AudioSource audioRotacion;
+    [SerializeField] private AudioClip sonidoRotacion;
+
     private bool rotando = false;
     public bool EstaRotando => rotando;
+
+    private bool bloqueaGravedad;
+    /// <summary>True solo mientras gira un cambio de piso (eje horizontal). Los giros A/D no pausan la gravedad.</summary>
+    public bool PausaGravedad => rotando && bloqueaGravedad;
 
     /// <summary>Se dispara cuando una rotación termina, con el mismo (eje, grados) que se usó.</summary>
     public event System.Action<Vector3, float> OnRotacionCompletada;
@@ -91,42 +99,52 @@ public class RotadorMundo : MonoBehaviour
         StartCoroutine(RotarSuave(eje, grados, correccionVertical));
     }
 
+    public void ReproducirSonidoRotacion()
+    {
+        if (audioRotacion != null && sonidoRotacion != null)
+        {
+            audioRotacion.PlayOneShot(sonidoRotacion);
+        }
+    }
+
     private IEnumerator RotarSuave(Vector3 eje, float grados, float correccionVertical)
     {
         rotando = true;
+        // Solo los giros que cambian el piso (eje horizontal) necesitan pausar la gravedad.
+        bloqueaGravedad = Mathf.Abs(Vector3.Dot(eje.normalized, Vector3.up)) < 0.99f;
 
-        // Pivote = posición del Jugador (fija durante todo el giro). Girar
-        // el Mundo alrededor de un punto externo requiere animar tanto su
-        // posición como su rotación juntas.
-        Vector3 pivote = jugador != null ? jugador.position : transform.position;
-
-        Vector3 posicionInicial = transform.position;
-        Quaternion rotacionInicial = transform.rotation;
         Quaternion deltaFinal = Quaternion.AngleAxis(grados, eje);
-        Vector3 correccion = Vector3.up * correccionVertical;
+        Quaternion rotacionFinal = deltaFinal * transform.rotation;
+        float tiempo = 0f;
+        float tPrevio = 0f;
 
-        float tiempoTranscurrido = 0f;
-
-        while (tiempoTranscurrido < duracionGiro)
+        while (tiempo < duracionGiro)
         {
-            tiempoTranscurrido += Time.deltaTime;
-            float t = Mathf.Clamp01(tiempoTranscurrido / duracionGiro);
-            float tCurva = curvaGiro.Evaluate(t);
+            tiempo += Time.deltaTime;
+            float t = curvaGiro.Evaluate(Mathf.Clamp01(tiempo / duracionGiro));
 
-            Quaternion deltaActual = Quaternion.Slerp(Quaternion.identity, deltaFinal, tCurva);
+            // Rotación incremental de este frame, alrededor de donde está el jugador AHORA
+            Quaternion qPrevio = Quaternion.Slerp(Quaternion.identity, deltaFinal, tPrevio);
+            Quaternion qActual = Quaternion.Slerp(Quaternion.identity, deltaFinal, t);
+            Quaternion paso = qActual * Quaternion.Inverse(qPrevio);
 
-            // La corrección vertical se aplica de a poco, junto con el giro,
-            // para que el piso nuevo termine justo bajo los pies sin saltos.
-            transform.position = pivote + deltaActual * (posicionInicial - pivote) + correccion * tCurva;
-            transform.rotation = deltaActual * rotacionInicial;
+            Vector3 pivote = jugador != null ? jugador.position : transform.position;
+            transform.position = pivote
+                + paso * (transform.position - pivote)
+                + Vector3.up * (correccionVertical * (t - tPrevio));
+            transform.rotation = paso * transform.rotation;
+            tPrevio = t;
 
+            // Actualiza las físicas en tiempo real para que la gravedad no use posiciones viejas
+            Physics.SyncTransforms();
             yield return null;
         }
 
-        // Snap final exacto para evitar arrastre de error de punto flotante
-        transform.position = pivote + deltaFinal * (posicionInicial - pivote) + correccion;
-        transform.rotation = deltaFinal * rotacionInicial;
+        // Snap final exacto contra error de punto flotante
+        transform.rotation = rotacionFinal;
+        Physics.SyncTransforms();
         rotando = false;
+        bloqueaGravedad = false;
 
         OnRotacionCompletada?.Invoke(eje, grados);
     }

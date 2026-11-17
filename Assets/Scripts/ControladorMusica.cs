@@ -1,39 +1,92 @@
+
 using UnityEngine;
 
 public class ControladorMusica : MonoBehaviour
 {
+    [Header("Audio")]
     public AudioSource audioSource;
+
+    [Header("Musicas")]
     public AudioClip musicaMenu;
     public AudioClip musicaJuego;
+    public AudioClip musicaDerrota;
+    public AudioClip musicaVictoria;
+    public AudioClip musicaNuevoRecord;
 
-    // Cambiar a música del juego al iniciar
-    public void CambiarAJuego()
-    {
-        audioSource.Stop();
-        audioSource.clip = musicaJuego;
-        audioSource.Play();
-    }
+    [Header("Volumenes")]
+    [Range(0f, 1f)] public float volumenMenu = 0.7f;
+    [Range(0f, 1f)] public float volumenJuego = 0.7f;
+    [Range(0f, 1f)] public float volumenDerrota = 0.35f;
+    [Range(0f, 1f)] public float volumenVictoria = 0.65f;
+    [Range(0f, 1f)] public float volumenNuevoRecord = 0.75f;
 
-    // Volver al menú y reiniciar la canción desde cero
-    public void CambiarAMenuYReiniciar()
+    private void Awake()
     {
-        audioSource.Stop();
-        audioSource.clip = musicaMenu;
-        audioSource.Play();
-    }
+        if (audioSource == null)
+            audioSource = GetComponent<AudioSource>();
 
-    // Pausar la música manteniendo el punto exacto
-    public void PausarMusica()
-    {
-        if (audioSource.isPlaying)
+        if (audioSource != null)
         {
-            audioSource.Pause();
+            audioSource.loop = true;
+            audioSource.spatialBlend = 0f;
         }
     }
 
-    // Reanudar la música desde donde se quedó
+    private void CambiarMusica(AudioClip nuevaMusica, float volumen)
+    {
+        if (audioSource == null || nuevaMusica == null)
+            return;
+
+        audioSource.Stop();
+        audioSource.clip = nuevaMusica;
+        audioSource.volume = volumen;
+        audioSource.loop = true;
+        audioSource.Play();
+    }
+
+    public void CambiarAJuego()
+    {
+        CambiarMusica(musicaJuego, volumenJuego);
+    }
+
+    public void CambiarAMenuYReiniciar()
+    {
+        CambiarMusica(musicaMenu, volumenMenu);
+    }
+
+    public void CambiarADerrota()
+    {
+        Debug.Log("CAMBIANDO A MUSICA DE DERROTA");
+
+        CambiarMusica(musicaDerrota, volumenDerrota);
+    }
+
+    public void CambiarAVictoria()
+    {
+        CambiarMusica(musicaVictoria, volumenVictoria);
+    }
+
+    public void CambiarANuevoRecord()
+    {
+        if (musicaNuevoRecord != null)
+            CambiarMusica(musicaNuevoRecord, volumenNuevoRecord);
+        else
+            CambiarAVictoria();
+    }
+    public void DetenerMusica()
+    {
+        if (audioSource != null)
+            audioSource.Stop();
+    }
+    public void PausarMusica()
+    {
+        if (audioSource != null && audioSource.isPlaying)
+            audioSource.Pause();
+    }
+
     public void ReanudarMusica()
     {
-        audioSource.UnPause();
+        if (audioSource != null)
+            audioSource.UnPause();
     }
 }

@@ -47,6 +47,13 @@ public class MovimientoJugador : MonoBehaviour
 
     private void Update()
     {
+        if (ControlPartida.Instancia == null ||
+            !ControlPartida.Instancia.EstaJugando)
+        {
+            ActualizarAnimacion(0f, false);
+            return;
+        }
+
         if (rotadorMundo != null && rotadorMundo.EstaRotando)
         {
             QuitarTodosLosResaltados();
