@@ -7,6 +7,7 @@ public class GeneradorBoosters : MonoBehaviour
     [Header("Referencias")]
     public GameObject prefabBooster;
     public Transform mundo;
+    public Transform jugador;
     public LayerMask capaParedes;
 
     [Header("Generacion")]
@@ -17,24 +18,30 @@ public class GeneradorBoosters : MonoBehaviour
     public float margenBorde = 0.5f;
     public int intentosMaximos = 100;
 
-    private float temporizador;
-    private readonly List<GameObject> boosters = new List<GameObject>();
-    private readonly List<Collider> superficies = new List<Collider>();
+    [Header("Sonido de aparicion")]
+    public AudioClip sonidoAparicion;
+    [Range(0f, 1f)] public float volumenAparicion = 0.8f;
+    public float distanciaMinima = 1f;
+    public float distanciaMaxima = 100f;
 
-    private Bounds limitesMundo;
+    private float temporizador;
+
+    private readonly List<GameObject> boosters =
+        new List<GameObject>();
+
+    private readonly List<Collider> superficies =
+        new List<Collider>();
 
     void Start()
     {
-        if (mundo == null || prefabBooster == null)
+        if (mundo == null || prefabBooster == null || jugador == null)
         {
-            Debug.LogError("Faltan referencias.");
+            Debug.LogError("Faltan referencias en GeneradorBoosters.");
             enabled = false;
             return;
         }
 
         Collider[] colliders = mundo.GetComponentsInChildren<Collider>();
-
-        bool primero = true;
 
         foreach (Collider col in colliders)
         {
@@ -45,16 +52,6 @@ public class GeneradorBoosters : MonoBehaviour
                 continue;
 
             superficies.Add(col);
-
-            if (primero)
-            {
-                limitesMundo = col.bounds;
-                primero = false;
-            }
-            else
-            {
-                limitesMundo.Encapsulate(col.bounds);
-            }
         }
 
         if (superficies.Count == 0)
@@ -83,37 +80,58 @@ public class GeneradorBoosters : MonoBehaviour
         }
     }
 
-
     void GenerarBooster()
     {
+        Bounds limites = new Bounds();
+        bool primero = true;
+
+        foreach (Collider col in superficies)
+        {
+            if (col == null || !col.enabled)
+                continue;
+
+            if (primero)
+            {
+                limites = col.bounds;
+                primero = false;
+            }
+            else
+            {
+                limites.Encapsulate(col.bounds);
+            }
+        }
+
+        if (primero)
+            return;
+
         for (int i = 0; i < intentosMaximos; i++)
         {
-            Collider superficie = superficies[
-                Random.Range(0, superficies.Count)
-            ];
-
-            Bounds b = superficie.bounds;
-
             float x = Random.Range(
-                b.min.x + margenBorde,
-                b.max.x - margenBorde
+                limites.min.x + margenBorde,
+                limites.max.x - margenBorde
             );
 
             float z = Random.Range(
-                b.min.z + margenBorde,
-                b.max.z - margenBorde
+                limites.min.z + margenBorde,
+                limites.max.z - margenBorde
             );
 
             Vector3 origen = new Vector3(
                 x,
-                b.max.y + 0.2f,
+                jugador.position.y + 0.5f,
                 z
             );
 
-            if (!superficie.Raycast(
-                new Ray(origen, Vector3.down),
+            if (!Physics.Raycast(
+                origen,
+                Vector3.down,
                 out RaycastHit hit,
-                b.size.y + 1f))
+                limites.size.y,
+                capaParedes,
+                QueryTriggerInteraction.Ignore))
+                continue;
+
+            if (!hit.collider.transform.IsChildOf(mundo))
                 continue;
 
             if (Vector3.Dot(hit.normal, Vector3.up) < 0.9f)
@@ -122,14 +140,6 @@ public class GeneradorBoosters : MonoBehaviour
             Vector3 posicion =
                 hit.point + Vector3.up * alturaSobreSuelo;
 
-            // Evitar la zona exterior superior del mundo
-            if (posicion.y >= limitesMundo.max.y - margenBorde)
-                continue;
-
-            if (posicion.y <= limitesMundo.min.y + margenBorde)
-                continue;
-
-            // Comprobar espacio libre
             if (Physics.CheckSphere(
                 posicion,
                 radioLibre,
@@ -164,10 +174,42 @@ public class GeneradorBoosters : MonoBehaviour
             nuevo.SetActive(true);
             boosters.Add(nuevo);
 
+            ReproducirAparicion(posicion);
+
             Debug.Log("Booster generado: " + posicion);
             return;
         }
 
         Debug.LogWarning("No se encontro posicion valida.");
+    }
+
+    void ReproducirAparicion(Vector3 posicion)
+    {
+        if (sonidoAparicion == null)
+            return;
+
+        GameObject objetoAudio =
+            new GameObject("SonidoAparicionBooster");
+
+        objetoAudio.transform.position = posicion;
+
+        AudioSource audio =
+            objetoAudio.AddComponent<AudioSource>();
+
+        audio.playOnAwake = false;
+        audio.clip = sonidoAparicion;
+        audio.volume = volumenAparicion;
+        audio.spatialBlend = 1f;
+        audio.rolloffMode = AudioRolloffMode.Linear;
+        audio.minDistance = distanciaMinima;
+        audio.maxDistance = distanciaMaxima;
+        audio.dopplerLevel = 0f;
+
+        audio.Play();
+
+        Destroy(
+            objetoAudio,
+            sonidoAparicion.length + 0.1f
+        );
     }
 }

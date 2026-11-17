@@ -468,7 +468,6 @@ public class BallSimulator : MonoBehaviour
 
         if (sonidoPelota != null)
         {
-            Debug.Log("CHOQUE DETECTADO: " + (-vn));
             sonidoPelota.ReproducirRebote(-vn);
         }
 
