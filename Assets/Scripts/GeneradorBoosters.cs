@@ -1,6 +1,7 @@
 
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Audio;
 
 public class GeneradorBoosters : MonoBehaviour
 {
@@ -18,11 +19,22 @@ public class GeneradorBoosters : MonoBehaviour
     public float margenBorde = 0.5f;
     public int intentosMaximos = 100;
 
+    [Header("Dificultad Facil")]
+    public float tiempoFacil = 10f;
+    public int maximoFacil = 5;
+
+    [Header("Dificultad Dificil")]
+    public float tiempoDificil = 18f;
+    public int maximoDificil = 3;
+
     [Header("Sonido de aparicion")]
     public AudioClip sonidoAparicion;
     [Range(0f, 1f)] public float volumenAparicion = 0.8f;
     public float distanciaMinima = 1f;
     public float distanciaMaxima = 100f;
+
+    [Header("Audio Mixer")]
+    public AudioMixerGroup grupoEfectos;
 
     private float temporizador;
 
@@ -34,6 +46,8 @@ public class GeneradorBoosters : MonoBehaviour
 
     void Start()
     {
+        ConfigurarDificultad();
+
         if (mundo == null || prefabBooster == null || jugador == null)
         {
             Debug.LogError("Faltan referencias en GeneradorBoosters.");
@@ -59,6 +73,23 @@ public class GeneradorBoosters : MonoBehaviour
             Debug.LogError("No se encontraron superficies.");
             enabled = false;
         }
+    }
+
+    public void ConfigurarDificultad()
+    {
+        if (DificultadJuego.dificultadActual ==
+            DificultadJuego.Nivel.Facil)
+        {
+            tiempoGeneracion = tiempoFacil;
+            maximoBoosters = maximoFacil;
+        }
+        else
+        {
+            tiempoGeneracion = tiempoDificil;
+            maximoBoosters = maximoDificil;
+        }
+
+        temporizador = 0f;
     }
 
     void Update()
@@ -198,6 +229,7 @@ public class GeneradorBoosters : MonoBehaviour
 
         audio.playOnAwake = false;
         audio.clip = sonidoAparicion;
+        audio.outputAudioMixerGroup = grupoEfectos;
         audio.volume = volumenAparicion;
         audio.spatialBlend = 1f;
         audio.rolloffMode = AudioRolloffMode.Linear;

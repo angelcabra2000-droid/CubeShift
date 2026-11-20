@@ -19,19 +19,39 @@ public class MenuVictoria : MonoBehaviour
     public AudioClip sonidoVictoria;
     public AudioClip sonidoNuevoRecord;
 
+    private bool ultimoResultadoNuevoRecord;
+    private float ultimoTiempoEvaluado = -1f;
+    private bool resultadoCalculado;
+
+    private string ObtenerClaveRecord()
+    {
+        if (DificultadJuego.dificultadActual ==
+            DificultadJuego.Nivel.Dificil)
+        {
+            return "RecordCubeShiftDificil";
+        }
+
+        return "RecordCubeShiftFacil";
+    }
+
     public void MostrarVictoria(float tiempo)
     {
+        string claveRecord = ObtenerClaveRecord();
+
         float recordAnterior = PlayerPrefs.GetFloat(
-            "RecordCubeShift", -1f
+            claveRecord, -1f
         );
-        
 
         bool esNuevoRecord =
             recordAnterior < 0f || tiempo < recordAnterior;
 
+        ultimoResultadoNuevoRecord = esNuevoRecord;
+        ultimoTiempoEvaluado = tiempo;
+        resultadoCalculado = true;
+
         if (esNuevoRecord)
         {
-            PlayerPrefs.SetFloat("RecordCubeShift", tiempo);
+            PlayerPrefs.SetFloat(claveRecord, tiempo);
             PlayerPrefs.Save();
         }
 
@@ -50,8 +70,6 @@ public class MenuVictoria : MonoBehaviour
         {
             controladorMusica.CambiarAVictoria();
         }
-
-     
     }
 
     private string FormatearTiempo(float tiempo)
@@ -72,16 +90,31 @@ public class MenuVictoria : MonoBehaviour
         Scene escena = SceneManager.GetActiveScene();
         SceneManager.LoadScene(escena.buildIndex);
     }
+
     public void DetenerMusicaNivel()
     {
         if (controladorMusica != null)
             controladorMusica.DetenerMusica();
     }
+
     public void ReproducirSonidoVictoria(float tiempo)
     {
-        float recordAnterior = PlayerPrefs.GetFloat("RecordCubeShift", -1f);
+        bool esNuevoRecord;
 
-        bool esNuevoRecord = recordAnterior < 0f || tiempo < recordAnterior;
+        if (resultadoCalculado &&
+            Mathf.Approximately(ultimoTiempoEvaluado, tiempo))
+        {
+            esNuevoRecord = ultimoResultadoNuevoRecord;
+        }
+        else
+        {
+            float recordAnterior = PlayerPrefs.GetFloat(
+                ObtenerClaveRecord(), -1f
+            );
+
+            esNuevoRecord =
+                recordAnterior < 0f || tiempo < recordAnterior;
+        }
 
         AudioClip sonido = esNuevoRecord
             ? sonidoNuevoRecord

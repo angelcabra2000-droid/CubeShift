@@ -1,92 +1,211 @@
+
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>
-/// Oculta (o hace transparentes) las paredes que quedan entre la cámara y
-/// lo que la cámara está enfocando: el Player normalmente, o la pelota mientras
-/// se mantiene ESPACIO (y el punto intermedio durante la transición).
-///
-/// Cada frame lanza un SphereCast desde la cámara hacia el punto de foco. Todo
-/// lo que golpee en el camino (que esté en el Layer "Paredes") se oculta;
-/// en cuanto deja de estar en el camino, se vuelve a mostrar.
-///
-/// Colocar este script sobre la Main Camera (el mismo objeto que tiene CamaraVertices).
-///
-/// --- CONFIGURACIÓN NECESARIA ---
-/// 1. Layer "Paredes" asignado a todas las paredes del laberinto (NO al Player ni a la pelota).
-/// 2. Asigna ese Layer en "Capa Paredes".
-/// 3. "Camara Vertices" se busca solo en este mismo objeto; si no está, se usa "Jugador".
-/// </summary>
-[DefaultExecutionOrder(1001)] // después de CamaraVertices (1000) y de BallSimulator
+[DefaultExecutionOrder(1001)]
 public class OcultarParedesEntreCamaraYPlayer : MonoBehaviour
 {
     [Header("Referencias")]
-    [Tooltip("Si se deja vacío, se busca en este mismo GameObject.")]
     [SerializeField] private CamaraVertices camaraVertices;
-
-    [Tooltip("Solo se usa como respaldo si no hay CamaraVertices.")]
     [SerializeField] private Transform jugador;
-
-    [Tooltip("Layer que usan las paredes/geometría que se pueden ocultar. El Player y la pelota NO deben estar en este layer.")]
+    [SerializeField] private MovimientoJugador movimientoJugador;
     [SerializeField] private LayerMask capaParedes;
 
-    [Header("Detección")]
-    [Tooltip("Radio del SphereCast. Un poco más grueso que un rayo fino evita que se 'cuelen' bordes de pared sin ocultar.")]
+    [Header("Deteccion")]
     [SerializeField] private float radioDeteccion = 0.15f;
-
-    [Tooltip("Margen que se resta a la distancia al foco, para no ocultar accidentalmente algo justo detrás/alrededor de él.")]
     [SerializeField] private float margenAntesDelJugador = 0.3f;
 
-    private readonly HashSet<Renderer> paredesOcultas = new HashSet<Renderer>();
-    private readonly HashSet<Renderer> paredesEsteFrame = new HashSet<Renderer>();
+    [Header("Pared al retroceder")]
+    [SerializeField] private Material materialTransparente;
+    [SerializeField] private float distanciaDeteccionAtras = 4f;
+    [SerializeField] private float radioDeteccionAtras = 0.3f;
 
-    void Awake()
+    private readonly HashSet<Renderer> paredesOcultas =
+        new HashSet<Renderer>();
+
+    private readonly HashSet<Renderer> paredesEsteFrame =
+        new HashSet<Renderer>();
+
+    private readonly HashSet<Renderer> paredesTransparentes =
+        new HashSet<Renderer>();
+
+    private readonly HashSet<Renderer> transparentesEsteFrame =
+        new HashSet<Renderer>();
+
+    private readonly List<Renderer> restaurar =
+        new List<Renderer>();
+
+    private void Awake()
     {
-        if (camaraVertices == null) camaraVertices = GetComponent<CamaraVertices>();
+        if (camaraVertices == null)
+            camaraVertices = GetComponent<CamaraVertices>();
+
+        if (movimientoJugador == null && jugador != null)
+            movimientoJugador =
+                jugador.GetComponent<MovimientoJugador>();
     }
 
-    void LateUpdate()
+    private void LateUpdate()
+    {
+        transparentesEsteFrame.Clear();
+
+        DetectarParedDetras();
+
+        restaurar.Clear();
+
+        foreach (Renderer rend in paredesTransparentes)
+        {
+            if (!transparentesEsteFrame.Contains(rend))
+                restaurar.Add(rend);
+        }
+
+        foreach (Renderer rend in restaurar)
+        {
+            if (movimientoJugador != null)
+                movimientoJugador.DesactivarTransparencia(rend);
+
+            paredesTransparentes.Remove(rend);
+        }
+
+        ActualizarOcultamiento();
+    }
+
+    private void DetectarParedDetras()
+    {
+        if (jugador == null ||
+            camaraVertices == null ||
+            movimientoJugador == null ||
+            materialTransparente == null)
+            return;
+
+        if (ControlPartida.Instancia == null ||
+            !ControlPartida.Instancia.EstaJugando)
+            return;
+
+        if (!Input.GetKey(KeyCode.S))
+            return;
+
+        Vector3 direccionAtras = -camaraVertices.Adelante;
+
+        RaycastHit[] impactos = Physics.SphereCastAll(
+            jugador.position,
+            radioDeteccionAtras,
+            direccionAtras,
+            distanciaDeteccionAtras,
+            capaParedes,
+            QueryTriggerInteraction.Ignore
+        );
+
+        foreach (RaycastHit impacto in impactos)
+        {
+            Renderer rend =
+                impacto.collider.GetComponentInParent<Renderer>();
+
+            if (rend == null)
+                continue;
+
+            transparentesEsteFrame.Add(rend);
+
+            if (!paredesTransparentes.Contains(rend))
+            {
+                movimientoJugador.ActivarTransparencia(
+                    rend,
+                    materialTransparente
+                );
+
+                paredesTransparentes.Add(rend);
+            }
+
+            rend.enabled = true;
+            paredesOcultas.Remove(rend);
+        }
+    }
+
+    private void ActualizarOcultamiento()
     {
         Vector3 foco;
-        if (camaraVertices != null) foco = camaraVertices.PuntoDeFoco;
-        else if (jugador != null) foco = jugador.position;
-        else return;
+
+        if (camaraVertices != null)
+            foco = camaraVertices.PuntoDeFoco;
+        else if (jugador != null)
+            foco = jugador.position;
+        else
+            return;
 
         paredesEsteFrame.Clear();
 
         Vector3 origen = transform.position;
         Vector3 hacia = foco - origen;
-        float distancia = Mathf.Max(0f, hacia.magnitude - margenAntesDelJugador);
+
+        float distancia = Mathf.Max(
+            0f,
+            hacia.magnitude - margenAntesDelJugador
+        );
 
         if (distancia > 0f)
         {
             RaycastHit[] impactos = Physics.SphereCastAll(
-                origen, radioDeteccion, hacia.normalized, distancia, capaParedes);
+                origen,
+                radioDeteccion,
+                hacia.normalized,
+                distancia,
+                capaParedes,
+                QueryTriggerInteraction.Ignore
+            );
 
-            foreach (var impacto in impactos)
+            foreach (RaycastHit impacto in impactos)
             {
-                Renderer rend = impacto.collider.GetComponentInParent<Renderer>();
-                if (rend == null) continue;
+                Renderer rend =
+                    impacto.collider.GetComponentInParent<Renderer>();
+
+                if (rend == null)
+                    continue;
+
+                if (paredesTransparentes.Contains(rend))
+                    continue;
 
                 paredesEsteFrame.Add(rend);
 
                 if (paredesOcultas.Add(rend))
-                {
                     rend.enabled = false;
-                }
             }
         }
 
-        // Vuelve a mostrar las que ya no están en el camino este frame.
         paredesOcultas.RemoveWhere(rend =>
         {
-            if (rend == null) return true; // limpia referencias destruidas
+            if (rend == null)
+                return true;
+
             if (!paredesEsteFrame.Contains(rend))
             {
                 rend.enabled = true;
                 return true;
             }
+
             return false;
         });
+    }
+
+    private void OnDisable()
+    {
+        restaurar.Clear();
+        restaurar.AddRange(paredesTransparentes);
+
+        foreach (Renderer rend in restaurar)
+        {
+            if (movimientoJugador != null)
+                movimientoJugador.DesactivarTransparencia(rend);
+        }
+
+        foreach (Renderer rend in paredesOcultas)
+        {
+            if (rend != null)
+                rend.enabled = true;
+        }
+
+        paredesTransparentes.Clear();
+        transparentesEsteFrame.Clear();
+        paredesOcultas.Clear();
+        paredesEsteFrame.Clear();
     }
 }

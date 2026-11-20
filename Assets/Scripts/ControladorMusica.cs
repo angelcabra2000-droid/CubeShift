@@ -9,6 +9,7 @@ public class ControladorMusica : MonoBehaviour
     [Header("Musicas")]
     public AudioClip musicaMenu;
     public AudioClip musicaJuego;
+    public AudioClip musicaJuegoDificil;
     public AudioClip musicaDerrota;
     public AudioClip musicaVictoria;
     public AudioClip musicaNuevoRecord;
@@ -16,6 +17,7 @@ public class ControladorMusica : MonoBehaviour
     [Header("Volumenes")]
     [Range(0f, 1f)] public float volumenMenu = 0.7f;
     [Range(0f, 1f)] public float volumenJuego = 0.7f;
+    [Range(0f, 1f)] public float volumenJuegoDificil = 0.7f;
     [Range(0f, 1f)] public float volumenDerrota = 0.35f;
     [Range(0f, 1f)] public float volumenVictoria = 0.65f;
     [Range(0f, 1f)] public float volumenNuevoRecord = 0.75f;
@@ -46,7 +48,23 @@ public class ControladorMusica : MonoBehaviour
 
     public void CambiarAJuego()
     {
-        CambiarMusica(musicaJuego, volumenJuego);
+        if (DificultadJuego.dificultadActual ==
+            DificultadJuego.Nivel.Dificil)
+        {
+            AudioClip musica = musicaJuegoDificil != null
+                ? musicaJuegoDificil
+                : musicaJuego;
+
+            float volumen = musicaJuegoDificil != null
+                ? volumenJuegoDificil
+                : volumenJuego;
+
+            CambiarMusica(musica, volumen);
+        }
+        else
+        {
+            CambiarMusica(musicaJuego, volumenJuego);
+        }
     }
 
     public void CambiarAMenuYReiniciar()
@@ -73,11 +91,13 @@ public class ControladorMusica : MonoBehaviour
         else
             CambiarAVictoria();
     }
+
     public void DetenerMusica()
     {
         if (audioSource != null)
             audioSource.Stop();
     }
+
     public void PausarMusica()
     {
         if (audioSource != null && audioSource.isPlaying)

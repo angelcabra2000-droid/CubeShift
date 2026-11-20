@@ -1,3 +1,4 @@
+
 using UnityEngine;
 
 public class InicioDirecto : MonoBehaviour
@@ -5,6 +6,9 @@ public class InicioDirecto : MonoBehaviour
     public GameObject menuPrincipal;
     public GameObject panelDificultad;
     public GameObject historia;
+
+    [Header("Interfaz")]
+    public InterfazPartida interfazPartida;
 
     void Start()
     {
@@ -25,5 +29,8 @@ public class InicioDirecto : MonoBehaviour
 
         if (ControlPartida.Instancia != null)
             ControlPartida.Instancia.PrepararPartida();
+
+        if (interfazPartida != null)
+            interfazPartida.MostrarInterfaz();
     }
 }

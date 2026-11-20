@@ -1,10 +1,14 @@
 
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class ControlPausa : MonoBehaviour
 {
+    [Header("Menus")]
     public GameObject menuPausa;
     public GameObject menuPrincipal;
+
+    [Header("Musica")]
     public ControladorMusica controladorMusica;
 
     public void Pausar()
@@ -42,18 +46,11 @@ public class ControlPausa : MonoBehaviour
     {
         Time.timeScale = 1f;
 
-        if (ControlPartida.Instancia != null)
-            ControlPartida.Instancia.VolverAlMenu();
+        PlayerPrefs.SetInt("ReinicioDirecto", 0);
+        PlayerPrefs.Save();
 
-        if (menuPausa != null)
-            menuPausa.SetActive(false);
+        Scene escena = SceneManager.GetActiveScene();
 
-        if (menuPrincipal != null)
-            menuPrincipal.SetActive(true);
-
-        if (controladorMusica != null)
-            controladorMusica.CambiarAMenuYReiniciar();
-
-        Debug.Log("Volviendo al menu principal");
+        SceneManager.LoadScene(escena.buildIndex);
     }
 }

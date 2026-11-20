@@ -3,9 +3,14 @@ using UnityEngine;
 
 public class EnergiaJugador : MonoBehaviour
 {
+    [Header("Energia")]
     public float energiaMaxima = 100f;
     public float energiaActual = 100f;
     public float consumoPorSegundo = 5f;
+
+    [Header("Dificultad")]
+    public float consumoFacil = 3f;
+    public float consumoDificil = 10f;
 
     [Header("Sonido de derrota")]
     public AudioSource audioDerrota;
@@ -23,12 +28,35 @@ public class EnergiaJugador : MonoBehaviour
         }
     }
 
+    void Start()
+    {
+        ConfigurarDificultad();
+    }
+
+    public void ConfigurarDificultad()
+    {
+        if (DificultadJuego.dificultadActual ==
+            DificultadJuego.Nivel.Facil)
+        {
+            consumoPorSegundo = consumoFacil;
+        }
+        else
+        {
+            consumoPorSegundo = consumoDificil;
+        }
+    }
+
     public void ConsumirEnergia(float movimiento)
     {
         if (movimiento > 0.01f)
         {
             energiaActual -= consumoPorSegundo * Time.deltaTime;
-            energiaActual = Mathf.Clamp(energiaActual, 0, energiaMaxima);
+
+            energiaActual = Mathf.Clamp(
+                energiaActual,
+                0f,
+                energiaMaxima
+            );
 
             if (energiaActual <= 0f && !derrotaReproducida)
             {

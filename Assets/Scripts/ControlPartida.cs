@@ -57,6 +57,9 @@ public class ControlPartida : MonoBehaviour
         estadoActual = Estado.Esperando;
         tiempoPartida = 0f;
         Time.timeScale = 1f;
+
+        if (controladorMusica != null)
+            controladorMusica.CambiarAJuego();
     }
 
     public void IniciarPartida()
@@ -65,6 +68,7 @@ public class ControlPartida : MonoBehaviour
             return;
 
         estadoActual = Estado.Jugando;
+
         Debug.Log("Partida iniciada");
     }
 
@@ -93,7 +97,8 @@ public class ControlPartida : MonoBehaviour
         estadoActual = Estado.Menu;
         tiempoPartida = 0f;
 
-        EnergiaJugador energia = FindFirstObjectByType<EnergiaJugador>();
+        EnergiaJugador energia =
+            FindFirstObjectByType<EnergiaJugador>();
 
         if (energia != null)
         {
@@ -141,7 +146,9 @@ public class ControlPartida : MonoBehaviour
         }
         else
         {
-            Debug.LogError("CONTROL PARTIDA: NO HAY CONTROLADOR MUSICA");
+            Debug.LogError(
+                "CONTROL PARTIDA: NO HAY CONTROLADOR MUSICA"
+            );
         }
     }
 }

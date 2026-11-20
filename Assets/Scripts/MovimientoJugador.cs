@@ -7,6 +7,7 @@ public class MovimientoJugador : MonoBehaviour
 {
     [Header("Referencias")]
     [SerializeField] private RotadorMundo rotadorMundo;
+
     private SensorPisoRotacion sensor;
     private AnimacionJugador anim;
     private EnergiaJugador energia;
@@ -21,19 +22,30 @@ public class MovimientoJugador : MonoBehaviour
     [Header("Giro con A/D")]
     [SerializeField] private bool invertirGiroMirandoAtras = true;
 
-    [Header("Depuración")]
+    [Header("Depuracion")]
     [SerializeField] private bool registrarBloqueos = true;
 
-    [Header("Resaltado de paredes candidatas")]
+    [Header("Resaltado de paredes")]
     [SerializeField] private Material materialResaltado;
+    [SerializeField] private Material materialResaltadoDificil;
 
-    private readonly Dictionary<Renderer, Material> materialesOriginales =
-        new Dictionary<Renderer, Material>();
+    private Material materialActual;
+
+    private class EstadoPared
+    {
+        public Material[] originales;
+        public bool resaltada;
+        public bool transparente;
+        public Material materialTransparente;
+    }
+
+    private readonly Dictionary<Renderer, EstadoPared> estados =
+        new Dictionary<Renderer, EstadoPared>();
 
     private readonly HashSet<Renderer> resaltadasEsteFrame =
         new HashSet<Renderer>();
 
-    private readonly List<Renderer> bufferRestaurar =
+    private readonly List<Renderer> buffer =
         new List<Renderer>();
 
     private string ultimoBloqueo = "";
@@ -43,6 +55,95 @@ public class MovimientoJugador : MonoBehaviour
         sensor = GetComponent<SensorPisoRotacion>();
         anim = GetComponent<AnimacionJugador>();
         energia = GetComponent<EnergiaJugador>();
+
+        materialActual = materialResaltado;
+    }
+
+    public void ConfigurarResaltado(bool dificil)
+    {
+        materialActual =
+            dificil && materialResaltadoDificil != null
+                ? materialResaltadoDificil
+                : materialResaltado;
+
+        QuitarTodosLosResaltados();
+    }
+
+    private EstadoPared ObtenerEstado(Renderer rend)
+    {
+        if (!estados.TryGetValue(rend, out EstadoPared estado))
+        {
+            estado = new EstadoPared();
+            estado.originales =
+                (Material[])rend.sharedMaterials.Clone();
+
+            estados.Add(rend, estado);
+        }
+
+        return estado;
+    }
+
+    private void AplicarMaterial(Renderer rend, EstadoPared estado)
+    {
+        if (rend == null)
+            return;
+
+        Material material = null;
+
+        if (estado.transparente)
+            material = estado.materialTransparente;
+        else if (estado.resaltada)
+            material = materialActual;
+
+        if (material == null)
+        {
+            rend.sharedMaterials = estado.originales;
+            return;
+        }
+
+        Material[] nuevos =
+            new Material[estado.originales.Length];
+
+        for (int i = 0; i < nuevos.Length; i++)
+            nuevos[i] = material;
+
+        rend.sharedMaterials = nuevos;
+    }
+
+    public void ActivarTransparencia(
+        Renderer rend,
+        Material materialTransparente)
+    {
+        if (rend == null || materialTransparente == null)
+            return;
+
+        EstadoPared estado = ObtenerEstado(rend);
+
+        estado.transparente = true;
+        estado.materialTransparente = materialTransparente;
+
+        AplicarMaterial(rend, estado);
+    }
+
+    public void DesactivarTransparencia(Renderer rend)
+    {
+        if (rend == null)
+            return;
+
+        if (!estados.TryGetValue(rend, out EstadoPared estado))
+            return;
+
+        estado.transparente = false;
+        estado.materialTransparente = null;
+
+        AplicarMaterial(rend, estado);
+        LimpiarEstado(rend, estado);
+    }
+
+    private void LimpiarEstado(Renderer rend, EstadoPared estado)
+    {
+        if (!estado.transparente && !estado.resaltada)
+            estados.Remove(rend);
     }
 
     private void Update()
@@ -50,6 +151,7 @@ public class MovimientoJugador : MonoBehaviour
         if (ControlPartida.Instancia == null ||
             !ControlPartida.Instancia.EstaJugando)
         {
+            QuitarTodosLosResaltados();
             ActualizarAnimacion(0f, false);
             return;
         }
@@ -123,15 +225,14 @@ public class MovimientoJugador : MonoBehaviour
         if (anim != null && anim.DebeEsperarGiro)
             return false;
 
-        // Movimiento
         Vector3 posicionAnterior = transform.position;
 
         transform.position +=
             direccion * velocidad * Time.deltaTime;
 
-        // Consumo de energia
         if (energia != null &&
-            (transform.position - posicionAnterior).sqrMagnitude > 0.0000001f)
+            (transform.position - posicionAnterior).sqrMagnitude >
+            0.0000001f)
         {
             energia.ConsumirEnergia(1f);
         }
@@ -201,7 +302,11 @@ public class MovimientoJugador : MonoBehaviour
 
             if (msg != ultimoBloqueo)
             {
-                Debug.Log("[MovimientoJugador] " + msg, hit.collider);
+                Debug.Log(
+                    "[MovimientoJugador] " + msg,
+                    hit.collider
+                );
+
                 ultimoBloqueo = msg;
             }
         }
@@ -225,57 +330,81 @@ public class MovimientoJugador : MonoBehaviour
         if (sensor.IntentarDerecha(out RaycastHit hDer))
             Resaltar(hDer);
 
-        bufferRestaurar.Clear();
+        buffer.Clear();
 
-        foreach (var rend in materialesOriginales.Keys)
+        foreach (var par in estados)
         {
-            if (!resaltadasEsteFrame.Contains(rend))
-                bufferRestaurar.Add(rend);
+            if (par.Value.resaltada &&
+                !resaltadasEsteFrame.Contains(par.Key))
+            {
+                buffer.Add(par.Key);
+            }
         }
 
-        foreach (var rend in bufferRestaurar)
-            Restaurar(rend);
+        foreach (Renderer rend in buffer)
+            QuitarResaltado(rend);
     }
 
     private void Resaltar(RaycastHit hit)
     {
-        if (materialResaltado == null)
+        if (materialActual == null || hit.collider == null)
             return;
 
-        Renderer rend = hit.collider != null
-            ? hit.collider.GetComponentInParent<Renderer>()
-            : null;
+        Renderer rend =
+            hit.collider.GetComponentInParent<Renderer>();
 
         if (rend == null)
             return;
 
         resaltadasEsteFrame.Add(rend);
 
-        if (!materialesOriginales.ContainsKey(rend))
-        {
-            materialesOriginales[rend] = rend.sharedMaterial;
-            rend.material = materialResaltado;
-        }
+        EstadoPared estado = ObtenerEstado(rend);
+
+        if (estado.resaltada)
+            return;
+
+        estado.resaltada = true;
+        AplicarMaterial(rend, estado);
     }
 
-    private void Restaurar(Renderer rend)
+    private void QuitarResaltado(Renderer rend)
     {
-        if (rend != null &&
-            materialesOriginales.TryGetValue(
-                rend, out Material original))
-        {
-            rend.material = original;
-        }
+        if (rend == null)
+            return;
 
-        materialesOriginales.Remove(rend);
+        if (!estados.TryGetValue(rend, out EstadoPared estado))
+            return;
+
+        estado.resaltada = false;
+
+        AplicarMaterial(rend, estado);
+        LimpiarEstado(rend, estado);
     }
 
     private void QuitarTodosLosResaltados()
     {
-        bufferRestaurar.Clear();
-        bufferRestaurar.AddRange(materialesOriginales.Keys);
+        buffer.Clear();
 
-        foreach (var rend in bufferRestaurar)
-            Restaurar(rend);
+        foreach (var par in estados)
+        {
+            if (par.Value.resaltada)
+                buffer.Add(par.Key);
+        }
+
+        foreach (Renderer rend in buffer)
+            QuitarResaltado(rend);
+    }
+
+    private void OnDisable()
+    {
+        foreach (var par in estados)
+        {
+            if (par.Key != null)
+                par.Key.sharedMaterials = par.Value.originales;
+        }
+
+        estados.Clear();
+        resaltadasEsteFrame.Clear();
+        buffer.Clear();
     }
 }

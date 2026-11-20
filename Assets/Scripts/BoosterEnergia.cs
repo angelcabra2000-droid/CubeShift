@@ -1,11 +1,15 @@
 
 using UnityEngine;
+using UnityEngine.Audio;
 
 public class BoosterEnergia : MonoBehaviour
 {
     [Header("Sonido")]
     public AudioClip sonidoRecoger;
     [Range(0f, 1f)] public float volumen = 0.8f;
+
+    [Header("Audio Mixer")]
+    public AudioMixerGroup grupoEfectos;
 
     private bool recogido = false;
 
@@ -29,15 +33,24 @@ public class BoosterEnergia : MonoBehaviour
                 {
                     Debug.Log("SONIDO BOOSTER EJECUTADO");
 
-                    GameObject audioTemporal = new GameObject("SonidoRecogerBooster");
+                    GameObject audioTemporal =
+                        new GameObject("SonidoRecogerBooster");
 
-                    AudioSource audio = audioTemporal.AddComponent<AudioSource>();
+                    AudioSource audio =
+                        audioTemporal.AddComponent<AudioSource>();
+
                     audio.clip = sonidoRecoger;
+                    audio.outputAudioMixerGroup = grupoEfectos;
                     audio.volume = volumen;
                     audio.spatialBlend = 0f;
+                    audio.playOnAwake = false;
+
                     audio.Play();
 
-                    Destroy(audioTemporal, sonidoRecoger.length + 0.1f);
+                    Destroy(
+                        audioTemporal,
+                        sonidoRecoger.length + 0.1f
+                    );
                 }
 
                 Destroy(gameObject);
